@@ -221,8 +221,8 @@ void print_pyobj_rec(pyobj v) {
   }
   default:
     printf("error, unhandled case in print_pyobj_rec\n");
-    *(int*)0 = 42;
-  } 
+    exit(1);
+  }
 }
 
 void print_pyobj(pyobj v) {
@@ -306,12 +306,12 @@ pyobj list_add(pyobj x, pyobj y) {
 
 pyobj list_sub(pyobj x, pyobj y) {
   printf("error, unsupported operand types");
-  *(int*)0 = 42;
+  exit(1);
 }
 
 pyobj list_div(pyobj x, pyobj y) {
   printf("error, unsupported operand types");
-  *(int*)0 = 42;
+  exit(1);
 }
 
 pyobj list_mult(pyobj x, int n) {
@@ -330,7 +330,7 @@ pyobj list_mul(pyobj x, pyobj y) {
       return list_mult(y, x.u.i);
     default:
       printf("error, unsupported operand types");
-      *(int*)0 = 42;
+      exit(1);
     }
   case BOOL:
     switch (y.tag) {
@@ -338,7 +338,7 @@ pyobj list_mul(pyobj x, pyobj y) {
       return list_mult(y, x.u.b);
     default:
       printf("error, unsupported operand types");
-      *(int*)0 = 42;
+      exit(1);
     }
   case LIST:
     switch (y.tag) {
@@ -348,11 +348,11 @@ pyobj list_mul(pyobj x, pyobj y) {
       return list_mult(x, y.u.b);
     default:
       printf("error, unsupported operand types");
-      *(int*)0 = 42;
+      exit(1);
     }
   default:
     printf("error, unsupported operand types");
-    *(int*)0 = 42;
+    exit(1);
   }  
 }
 
@@ -369,7 +369,7 @@ int is_false(pyobj v)
     return v.u.l.len == 0;
   default:
     printf("error, unhandled case in is_false\n");
-    *(int*)0 = 42; 
+    exit(1);
   } 
 }
 
@@ -386,7 +386,7 @@ pyobj* subscript_pyobj(pyobj c, pyobj key)
     return list_nth(c, key);
   default:
     printf("error in subscript, not a list or dictionary\n");
-    *(int*)0 = 42;
+    exit(1);
   }
 }
 
@@ -401,7 +401,7 @@ pyobj NAME##_pyobj(pyobj a) { \
     return int_to_pyobj(OP a.u.b);                 \
   default: \
     printf("error, unhandled case in unary operator\n"); \
-    *(int*)0 = 42; \
+    exit(1); \
   } \
 }
 
@@ -423,7 +423,7 @@ pyobj NAME##_pyobj(pyobj a, pyobj b) { \
       return list_##NAME(a, b); \
     default: \
       printf("error, unhandled case in operator\n"); \
-      *(int*)0 = 42; \
+      exit(1); \
     } \
   case FLOAT: \
     switch (b.tag) { \
@@ -435,7 +435,7 @@ pyobj NAME##_pyobj(pyobj a, pyobj b) { \
       return float_to_pyobj(a.u.f OP b.u.b); \
     default: \
       printf("error, unhandled case in operator\n"); \
-      *(int*)0 = 42; \
+      exit(1); \
     } \
   case BOOL: \
     switch (b.tag) { \
@@ -449,7 +449,7 @@ pyobj NAME##_pyobj(pyobj a, pyobj b) { \
       return list_##NAME(a, b); \
     default: \
       printf("error, unhandled case in operator\n"); \
-      *(int*)0 = 42; \
+      exit(1); \
     } \
   case LIST: \
     switch (b.tag) { \
@@ -461,11 +461,11 @@ pyobj NAME##_pyobj(pyobj a, pyobj b) { \
       return list_##NAME(a, b); \
     default: \
       printf("error, unhandled case in operator\n"); \
-      *(int*)0 = 42; \
+      exit(1); \
     } \
   default: \
     printf("error, unhandled case in operator\n"); \
-    *(int*)0 = 42; \
+    exit(1); \
   } \
 }
 
