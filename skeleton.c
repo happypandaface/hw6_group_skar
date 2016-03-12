@@ -26,6 +26,10 @@
 #define mul_bool(a, b) (a * b)
 #define mul_float(a, b) (a * b)
 
+#define div_int(a, b) (a / b)
+#define div_bool(a, b) (a / b)
+#define div_float(a, b) (a / b)
+
 #define unary_add_int(a) (+a)
 #define unary_add_bool(a) (+a)
 #define unary_add_float(a) (+a)
@@ -305,6 +309,11 @@ pyobj list_sub(pyobj x, pyobj y) {
   *(int*)0 = 42;
 }
 
+pyobj list_div(pyobj x, pyobj y) {
+  printf("error, unsupported operand types");
+  *(int*)0 = 42;
+}
+
 pyobj list_mult(pyobj x, int n) {
   int i;
   pyobj r = make_list(0);
@@ -463,6 +472,7 @@ pyobj NAME##_pyobj(pyobj a, pyobj b) { \
 gen_binary_op(add, +)
 gen_binary_op(sub, -)
 gen_binary_op(mul, *)
+gen_binary_op(div, /)
 
 
 char logic_not_pyobj(pyobj v)

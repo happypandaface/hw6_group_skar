@@ -77,10 +77,10 @@ def generate_name(x):
     counter = counter + 1
     return name
 
-binary_op_classes = [Add, Sub, Mul]
+binary_op_classes = [Add, Sub, Mul, Div]
 unary_op_classes = [UnaryAdd, UnarySub, Not]
 
-class_to_fun = {Add: 'add', Sub: 'sub', Mul: 'mul',           
+class_to_fun = {Add: 'add', Sub: 'sub', Mul: 'mul', Div: 'div',           
                 UnaryAdd: 'unary_add', UnarySub: 'unary_sub', Not: 'logic_not' }
 
 compare_to_fun = {'<': 'less', '>': 'greater', '<=': 'less_equal', '>=': 'greater_equal', 
@@ -508,6 +508,7 @@ find_op_tag = {
     'add' : arithop,
     'sub' : arithop,
     'mul' : arithop,
+    'div' : arithop,
     'unary_add' : arithop,
     'unary_sub' : arithop,
     'logic_not' : boolop,
@@ -535,6 +536,7 @@ op_returns = {
     'add' : arith_ret,
     'sub' : arith_ret,
     'mul' : arith_ret,
+    'div' : arith_ret,
     'unary_add' : arith_ret,
     'unary_sub' : arith_ret,
     'logic_not' : bool_ret,
