@@ -30,7 +30,7 @@ def append_stmts(s1, s2):
 def make_assign(lhs, rhs):
     return Assign(nodes=[AssName(name=lhs, flags='OP_ASSIGN')], expr=rhs)
 
-#############################################################################################
+###############################################################################
 # Simplify comparison and logic operators
 
 # New Classes for the Intermediate Representation that
@@ -49,7 +49,8 @@ class PrimitiveOp(Node):
         return self.nodes
 
     def __repr__(self):
-        return "PrimitiveOp(%s, %s)" % (self.name, ', '.join([repr(e) for e in self.nodes]))
+        return ("PrimitiveOp(%s, %s)"
+            % (self.name, ', '.join([repr(e) for e in self.nodes])))
 
 class Let(Node):
     def __init__(self, var, rhs, body, lineno=None):
@@ -65,7 +66,8 @@ class Let(Node):
         return self.rhs, self.body
 
     def __repr__(self):
-        return "Let(%s, %s, %s)" % (repr(self.var), repr(self.rhs), repr(self.body))
+        return ("Let(%s, %s, %s)"
+            % (repr(self.var), repr(self.rhs), repr(self.body)))
 
 
 # the following counter is for generating unique names
@@ -80,11 +82,15 @@ def generate_name(x):
 binary_op_classes = [Add, Sub, Mul, Div]
 unary_op_classes = [UnaryAdd, UnarySub, Not]
 
-class_to_fun = {Add: 'add', Sub: 'sub', Mul: 'mul', Div: 'div',           
-                UnaryAdd: 'unary_add', UnarySub: 'unary_sub', Not: 'logic_not' }
+class_to_fun = {
+    Add: 'add', Sub: 'sub', Mul: 'mul', Div: 'div', UnaryAdd: 'unary_add',
+    UnarySub: 'unary_sub', Not: 'logic_not'
+}
 
-compare_to_fun = {'<': 'less', '>': 'greater', '<=': 'less_equal', '>=': 'greater_equal', 
-                '==': 'equal', '!=': 'not_equal', 'is': 'identical', 'in':'in_comp'}
+compare_to_fun = {
+    '<': 'less', '>': 'greater', '<=': 'less_equal', '>=': 'greater_equal',
+    '==': 'equal', '!=': 'not_equal', 'is': 'identical', 'in':'in_comp'
+}
 
 # context is either 'expr' or 'lhs'
 def simplify_ops(n, context='expr'):
@@ -102,12 +108,14 @@ def simplify_ops(n, context='expr'):
         else:
             return Discard(simplify_ops(n.expr))
     elif isinstance(n, If):
-        tests = [(simplify_ops(cond), simplify_ops(body)) for (cond,body) in n.tests]
+        tests = [
+            (simplify_ops(cond), simplify_ops(body)) for (cond,body) in n.tests
+        ]
         else_ = simplify_ops(n.else_)
         return If(tests, else_)
     elif n == None: # to handle when an If's else_ clause is not there
         return None
-    
+
     elif isinstance(n, While):
         test = simplify_ops(n.test)
         body = simplify_ops(n.body)
@@ -157,25 +165,36 @@ def simplify_ops(n, context='expr'):
         return r
 
     elif isinstance(n, IfExp):
-        return IfExp(simplify_ops(n.test), simplify_ops(n.then), simplify_ops(n.else_))
+        return IfExp(
+            simplify_ops(n.test), simplify_ops(n.then), simplify_ops(n.else_))
 
     elif isinstance(n, Compare):
         def gen_compare(lhs, ops):
             if len(ops) == 1:
                 op, rhs = ops[0]
-                return PrimitiveOp(compare_to_fun[op], [lhs, simplify_ops(rhs)])
+                return PrimitiveOp(
+                    compare_to_fun[op], [lhs, simplify_ops(rhs)]
+                )
             elif len(ops) > 1:
                 op, rhs = ops[0]
                 rhs_var = Name(generate_name('tmp'))
-                return Let(rhs_var.name, simplify_ops(rhs),
-                           PrimitiveOp('logic_and',
-                                       [PrimitiveOp(compare_to_fun[op], [lhs, rhs_var]),
-                                        gen_compare(rhs_var, ops[1:])]))
+                return Let(
+                    rhs_var.name, simplify_ops(rhs),
+                    PrimitiveOp(
+                        'logic_and',
+                        [
+                            PrimitiveOp(compare_to_fun[op], [lhs, rhs_var]),
+                            gen_compare(rhs_var, ops[1:])
+                        ]
+                    )
+                )
             else:
                 print >> logs, "error in gen_compare: zero length ops"
 
         lhs_var = Name(generate_name('tmp'))
-        return Let(lhs_var.name, simplify_ops(n.expr), gen_compare(lhs_var, n.ops))
+        return Let(
+            lhs_var.name, simplify_ops(n.expr), gen_compare(lhs_var, n.ops)
+        )
 
     elif isinstance(n, List):
         ls_name = generate_name('list')
@@ -183,24 +202,34 @@ def simplify_ops(n, context='expr'):
             if len(nodes) == 0:
                 return Name(ls_name)
             else:
-                return Let('_', PrimitiveOp('assign',\
-                                            [PrimitiveOp('deref',\
-                                                         [PrimitiveOp('subscript',\
-                                                                      [Name(ls_name), Const(i)])\
-                                                          ]),\
-                                             simplify_ops(nodes[0])]),\
-                           gen_list(nodes[1:], i + 1))
-        return Let(ls_name, PrimitiveOp('make_list', [Const(len(n.nodes))]),\
+                return Let(
+                    '_',
+                    PrimitiveOp('assign', [
+                        PrimitiveOp('deref', [
+                            PrimitiveOp('subscript', [
+                                Name(ls_name), Const(i)
+                            ])
+                        ]),
+                        simplify_ops(nodes[0])
+                    ]),
+                    gen_list(nodes[1:], i + 1)
+                )
+        return Let(ls_name, PrimitiveOp('make_list', [Const(len(n.nodes))]),
                    gen_list(n.nodes, 0))
 
     elif isinstance(n, Subscript):
-        return PrimitiveOp('deref', [PrimitiveOp('subscript', \
-                                                 [simplify_ops(n.expr), simplify_ops(n.subs[0])])])
+        return PrimitiveOp('deref', [
+            PrimitiveOp('subscript', [
+                simplify_ops(n.expr), simplify_ops(n.subs[0])
+            ])
+        ])
     else:
-        raise Exception('Error in simplify_ops: unrecognized AST node ' + repr(n))
+        raise Exception(
+            'Error in simplify_ops: unrecognized AST node ' + repr(n)
+        )
 
 
-###########################################################################################
+###############################################################################
 # Convert to static single-assignment form (SSA)
 
 def union(a,b):
@@ -214,10 +243,14 @@ def assigned_vars(n):
     elif isinstance(n, Pass):
         return set([])
     elif isinstance(n, If):
-        return reduce(union, [assigned_vars(b) for (c,b) in n.tests], set([])) \
-               | assigned_vars(n.else_) \
-               | (reduce(union, [assigned_vars(s) for s in n.phis], set([])) \
-                   if hasattr(n, 'phis') else set([]))
+        return (
+            reduce(union, [assigned_vars(b) for (c,b) in n.tests], set([]))
+            | assigned_vars(n.else_)
+            | (
+                reduce(union, [assigned_vars(s) for s in n.phis], set([]))
+                if hasattr(n, 'phis') else set([])
+            )
+        )
     elif n == None:
         return set([])
     elif isinstance(n, Assign):
@@ -225,9 +258,10 @@ def assigned_vars(n):
     elif isinstance(n, AssName):
         return set([n.name])
     elif isinstance(n, While):
-        return assigned_vars(n.body) \
-               | (reduce(union, [assigned_vars(s) for s in n.phis], set([])) \
-                   if hasattr(n, 'phis') else set([]))
+        return assigned_vars(n.body) | (
+            reduce(union, [assigned_vars(s) for s in n.phis], set([]))
+            if hasattr(n, 'phis') else set([])
+        )
     elif isinstance(n, Discard):
         return set([])
     else:
@@ -260,7 +294,9 @@ def convert_to_ssa(ast, current_version={}):
         return Stmt([convert_to_ssa(s, current_version) for s in ast.nodes])
 
     elif isinstance(ast, Printnl):
-        return Printnl([convert_to_ssa(e, current_version) for e in ast.nodes], ast.dest)
+        return Printnl(
+            [convert_to_ssa(e, current_version) for e in ast.nodes], ast.dest
+        )
 
     elif isinstance(ast, Pass):
         return ast
@@ -275,22 +311,28 @@ def convert_to_ssa(ast, current_version={}):
             body_cv = copy.deepcopy(current_version)
             new_body = convert_to_ssa(body, body_cv)
             new_tests.append((new_cond, new_body, body_cv))
-        
+
         else_cv = copy.deepcopy(current_version)
         new_else = convert_to_ssa(ast.else_, else_cv)
-        
-        assigned = reduce(union, [assigned_vars(b) for (c,b) in ast.tests], set([])) \
-                   | assigned_vars(ast.else_)
+
+        assigned = (
+            reduce(union, [assigned_vars(b) for (c,b) in ast.tests], set([]))
+            | assigned_vars(ast.else_)
+        )
 
         phis = []
         for x in assigned:
             current_version[x] = get_high(x)
-            phi_rhs = [Name(x + '_' + str(get_current(cv, x))) for (_,_,cv) in new_tests]
+            phi_rhs = [
+                Name(x + '_' + str(get_current(cv, x))) for _,_,cv in new_tests
+            ]
             phi_rhs.append(Name(x + '_' + str(get_current(else_cv, x))))
-            phi = make_assign(x + '_' + str(get_current(current_version, x)),\
-                              PrimitiveOp('phi', phi_rhs))
+            phi = make_assign(
+                x + '_' + str(get_current(current_version, x)),
+                PrimitiveOp('phi', phi_rhs)
+            )
             phis.append(phi)
-                
+
         ret = If(tests=[(c,b) for (c,b,_) in new_tests], else_=new_else)
         ret.phis = phis
         return ret
@@ -333,10 +375,12 @@ def convert_to_ssa(ast, current_version={}):
                 x = n.name
                 x_v = get_high(x)
                 current_version[x] = x_v
-                new_nodes.append(AssName(name=x + '_' + str(x_v), flags=n.flags))
+                new_nodes.append(
+                    AssName(name=(x + '_' + str(x_v)), flags=n.flags)
+                )
             else:
                 new_nodes.append(convert_to_ssa(n, current_version))
-                
+
         return Assign(expr=new_rhs, nodes=new_nodes)
 
     elif ast == None:
@@ -349,7 +393,9 @@ def convert_to_ssa(ast, current_version={}):
         if ast.name == 'True' or ast.name == 'False':
             return ast
         else:
-            return Name(ast.name + '_' + str(get_current(current_version, ast.name)))
+            return Name(
+                ast.name + '_' + str(get_current(current_version, ast.name))
+            )
 
     elif isinstance(ast, PrimitiveOp):
         nodes = [convert_to_ssa(e, current_version) for e in ast.nodes]
@@ -358,7 +404,7 @@ def convert_to_ssa(ast, current_version={}):
     elif isinstance(ast, IfExp):
         new_test = convert_to_ssa(ast.test, current_version)
         new_else = convert_to_ssa(ast.else_, current_version)
-        new_then = convert_to_ssa(ast.then, current_version)        
+        new_then = convert_to_ssa(ast.then, current_version)
         return IfExp(test=new_test, else_=new_else, then=new_then)
 
     elif isinstance(ast, Let):
@@ -369,10 +415,12 @@ def convert_to_ssa(ast, current_version={}):
         return Let(ast.var + '_' + str(v), rhs, body)
 
     else:
-        raise Exception('Error in convert_to_ssa: unrecognized AST node ' + repr(ast))
+        raise Exception(
+            'Error in convert_to_ssa: unrecognized AST node ' + repr(ast)
+        )
 
 
-#############################################################################################
+###############################################################################
 # Insert variable declarations
 
 class VarDecl(Node):
@@ -395,10 +443,11 @@ def insert_var_decls(n):
         decls = [VarDecl(x,'undefined') for x in assigned_vars(n.node)]
         return Module(n.doc, prepend_stmts(decls, n.node))
     else:
-        raise Exception('Error in insert_var_decls: unhandled AST ' + repr(n))                    
+        raise Exception('Error in insert_var_decls: unhandled AST ' + repr(n))
 
-###########################################################################################
-# Type analysis, this pass annotates the IR in-place with types in the 'type' attribute
+###############################################################################
+# Type analysis, this pass annotates the IR in-place with types in the 'type'
+# attribute
 
 def join(t1,t2):
     if t1 == 'pyobj':
@@ -626,7 +675,7 @@ def predict_type(n, env):
                 a.type = get_var_type(env, a.name)
             else:
                 predict_type(a, env)
-            
+
     elif isinstance(n, VarDecl):
         n.type = get_var_type(env, n.name)
 
@@ -636,14 +685,16 @@ def predict_type(n, env):
         elif isinstance(n.value, int):
             n.type = 'int'
         else:
-            raise Exception('Error in predict_type: unhandled constant ' + repr(n))            
+            raise Exception(
+                'Error in predict_type: unhandled constant ' + repr(n)
+            )
 
     elif isinstance(n, Name):
         if n.name == 'True' or n.name == 'False':
             n.type = 'bool'
         else:
             n.type = get_var_type(env, n.name)
-            
+
     elif isinstance(n, PrimitiveOp):
         for e in n.nodes:
             predict_type(e, env)
@@ -664,11 +715,13 @@ def predict_type(n, env):
         update_var_type(body_env, n.var, n.rhs.type)
         predict_type(n.body, body_env)
         n.type = n.body.type
-        
-    else:
-        raise Exception('Error in predict_type: unrecognized AST node ' + repr(n))
 
-###########################################################################################
+    else:
+        raise Exception(
+            'Error in predict_type: unrecognized AST node ' + repr(n)
+        )
+
+###############################################################################
 # Type specialization
 #   select specialized primitive operations
 #   insert calls to is_true and make_* where appropriate
@@ -697,7 +750,10 @@ def type_specialize(n):
         return Stmt([type_specialize(s) for s in n.nodes])
     elif isinstance(n, Printnl):
         # would be nice to specialize print, but not a high priority
-        return Printnl([convert_to_pyobj(type_specialize(e)) for e in n.nodes], n.dest)
+        return Printnl(
+            [convert_to_pyobj(type_specialize(e)) for e in n.nodes],
+            n.dest
+        )
     elif isinstance(n, Discard):
         return Discard(type_specialize(n.expr))
     elif isinstance(n, If):
@@ -728,7 +784,7 @@ def type_specialize(n):
 
     elif isinstance(n, AssName):
         return n
-    
+
     elif isinstance(n, VarDecl):
         return n
 
@@ -764,10 +820,12 @@ def type_specialize(n):
         r.type = n.type
         return r
     else:
-        raise Exception('Error in type_specialize: unrecognized AST node ' + repr(n))
+        raise Exception(
+            'Error in type_specialize: unrecognized AST node ' + repr(n)
+        )
 
 
-###########################################################################################
+###############################################################################
 # Remove SSA
 
 def split_phis(phis):
@@ -825,7 +883,11 @@ def remove_ssa(n):
         if debug:
             print >> logs, 'remove ssa While ', phis, branch_dict
         if 0 < len(branch_dict):
-            ret = Stmt(branch_dict[0] + [While(test, append_stmts(body, Stmt(branch_dict[1])), None)])
+            ret = Stmt(
+                branch_dict[0] + [
+                    While(test, append_stmts(body, Stmt(branch_dict[1])), None)
+                ]
+            )
         else:
             ret = While(test, body, None)
         return ret
@@ -836,26 +898,34 @@ def remove_ssa(n):
     elif isinstance(n, VarDecl):
         return n
     else:
-        raise Exception('Error in remove_ssa: unrecognized AST node ' + repr(n))
+        raise Exception(
+            'Error in remove_ssa: unrecognized AST node ' + repr(n)
+        )
 
-    
-###########################################################################################
+
+###############################################################################
 # Generate C output
-    
-python_type_to_c = { 'int' : 'int', 'bool' : 'char', 'float' : 'double', 'pyobj' : 'pyobj',
-                     'undefined' : 'pyobj' }
+
+python_type_to_c = {
+    'int' : 'int', 'bool' : 'char', 'float' : 'double', 'pyobj' : 'pyobj',
+    'undefined' : 'pyobj'
+}
 
 skeleton = open("skeleton.c").readlines()
 
 def generate_c(n):
     if isinstance(n, Module):
-        return "".join(skeleton[:-2]) + generate_c(n.node) + "".join(skeleton[-2:])
+        return "".join(
+            skeleton[:-2]) + generate_c(n.node) + "".join(skeleton[-2:]
+        )
     elif isinstance(n, Stmt):
         return '{' + '\n'.join([generate_c(e) for e in n.nodes]) + '}'
     elif isinstance(n, Printnl):
         space = 'printf(\" \");'
         newline = 'printf(\"\\n\");'
-        nodes_in_c = ['print_%s(%s);' % (x.type, generate_c(x)) for x in n.nodes] 
+        nodes_in_c = [
+            'print_%s(%s);' % (x.type, generate_c(x)) for x in n.nodes
+        ]
         return space.join(nodes_in_c) + newline
     elif isinstance(n, Discard):
         return generate_c(n.expr) + ';'
@@ -864,7 +934,10 @@ def generate_c(n):
             else_ = ''
         else:
             else_ = 'else\n' + generate_c(n.else_)
-        return 'if ' + '\n else if '.join(['(%s)\n%s' % (generate_c(cond), generate_c(body)) for (cond,body) in n.tests]) + else_
+        return 'if ' + '\n else if '.join([
+            '(%s)\n%s' % (generate_c(cond), generate_c(body))
+            for cond,body in n.tests
+        ]) + else_
     elif isinstance(n, While):
         return 'while (%s)\n%s' % (generate_c(n.test), generate_c(n.body))
     elif isinstance(n, Pass):
@@ -876,7 +949,7 @@ def generate_c(n):
         return n.name
     elif isinstance(n, VarDecl):
         return '%s %s;' % (python_type_to_c[n.type], n.name)
-    
+
     elif isinstance(n, Const):
         return repr(n.value)
     elif isinstance(n, Name):
@@ -889,21 +962,36 @@ def generate_c(n):
     elif isinstance(n, PrimitiveOp):
         if n.name == 'deref':
             return '*' + generate_c(n.nodes[0])
-        elif n.name == 'assign_pyobj' or n.name == 'assign_int' or n.name == 'assign_bool' or n.name == 'assign_float':
-            return '(' + generate_c(n.nodes[0]) + '=' + generate_c(n.nodes[1]) + ')'
+        elif n.name in (
+                'assign_pyobj', 'assign_int', 'assign_bool', 'assign_float'):
+            return (
+                '('
+                + generate_c(n.nodes[0]) + '=' + generate_c(n.nodes[1])
+                + ')'
+            )
         else:
-            return n.name + '(' + ', '.join([generate_c(e) for e in n.nodes]) + ')'
+            return (
+                n.name + '('
+                + ', '.join([generate_c(e) for e in n.nodes])
+                + ')'
+            )
     elif isinstance(n, IfExp):
         return '(' + generate_c(n.test) + ' ? ' \
                + generate_c(n.then) + ':' + generate_c(n.else_) + ')'
     elif isinstance(n, Let):
         t = python_type_to_c[n.rhs.type]
         rhs = generate_c(n.rhs)
-        return '({ ' + t + ' ' + n.var + ' = ' + rhs + '; ' + generate_c(n.body) + ';})'
+        return (
+            '({ '
+            + t + ' ' + n.var + ' = ' + rhs + '; ' + generate_c(n.body)
+            + ';})'
+        )
     elif n == None:
         return ''
     else:
-        raise Exception('Error in generate_c: unrecognized AST node ' + repr(n))
+        raise Exception(
+            'Error in generate_c: unrecognized AST node ' + repr(n)
+        )
 
 ######################### MAIN ##################################
 
@@ -921,7 +1009,7 @@ if __name__ == "__main__":
         if debug:
             print >> logs, ir
             print >> logs, 'inserting var decls ---------'
-        ir = insert_var_decls(ir)        
+        ir = insert_var_decls(ir)
         if debug:
             print >> logs, ir
             print >> logs, 'predicting types -----------'
