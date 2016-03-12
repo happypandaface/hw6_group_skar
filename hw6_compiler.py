@@ -7,8 +7,6 @@ import compiler
 from compiler.ast import *
 import copy
 
-debug = True
-
 def prepend_stmts(ss, s):
     if isinstance(s, Stmt):
         return Stmt(ss + s.nodes)
@@ -996,6 +994,9 @@ def generate_c(n):
 ######################### MAIN ##################################
 
 if __name__ == "__main__":
+    global debug
+    debug = not any(arg == '-q' for arg in sys.argv[1:])
+
     try:
         ast = compiler.parse("".join(sys.stdin.readlines()))
         if debug:
