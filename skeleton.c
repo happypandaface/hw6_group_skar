@@ -524,7 +524,7 @@ char list_greater_equal(array x, array y) {
 
 #define gen_comparison(NAME, OP) \
 char NAME##_pyobj(pyobj a, pyobj b) \
-{\
+{ \
     switch (a.tag) { \
     case INT: \
         switch (b.tag) { \
@@ -536,7 +536,7 @@ char NAME##_pyobj(pyobj a, pyobj b) \
             return a.u.i OP b.u.b; \
         default: \
             return 0; \
-        }\
+        } \
     case FLOAT: \
         switch (b.tag) { \
         case INT: \
@@ -547,7 +547,7 @@ char NAME##_pyobj(pyobj a, pyobj b) \
             return a.u.f OP b.u.b; \
         default: \
             return 0; \
-        }\
+        } \
     case BOOL: \
         switch (b.tag) { \
         case INT: \
@@ -558,7 +558,7 @@ char NAME##_pyobj(pyobj a, pyobj b) \
             return a.u.b OP b.u.b; \
         default: \
             return 0; \
-        }\
+        } \
     case LIST: \
         switch (b.tag) { \
         case LIST: \
