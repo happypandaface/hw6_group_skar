@@ -1,6 +1,7 @@
+#include <ctype.h>
+#include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <math.h>
 #include <string.h>
 
 #define SIGN_OF(a) (((a) < 0) ? -1 : 1)
