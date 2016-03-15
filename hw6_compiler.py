@@ -98,6 +98,8 @@ def simplify_ops(n, context='expr'):
     elif isinstance(n, Function):
         n.code = simplify_ops(n.code)
         return n
+    elif isinstance(n, CallFunc):
+        return n
     elif isinstance(n, Stmt):
         nodes = [simplify_ops(s) for s in n.nodes]
         return Stmt(nodes)
@@ -293,6 +295,9 @@ def convert_to_ssa(ast, current_version={}):
 
     elif isinstance(ast, Function):
         ast.code = convert_to_ssa(ast.code)
+        return ast
+
+    elif isinstance(ast, CallFunc):
         return ast
 
     elif isinstance(ast, Stmt):
@@ -644,6 +649,9 @@ def predict_type(n, env):
     elif isinstance(n, Function):
         predict_type(n.code,env)
 
+    elif isinstance(n, CallFunc):
+        pass#predict_type(n.code,env)
+
     elif isinstance(n, Stmt):
         for s in n.nodes:
             predict_type(s, env)
@@ -756,6 +764,8 @@ def type_specialize(n):
         return Module(n.doc, type_specialize(n.node))
     elif isinstance(n, Function):
         n.code=type_specialize(n.code)
+        return n
+    elif isinstance(n, CallFunc):
         return n
     elif isinstance(n, Stmt):
         return Stmt([type_specialize(s) for s in n.nodes])
@@ -933,7 +943,6 @@ def generate_c(n):
     global functions
     if isinstance(n, Module):
         main = generate_c(n.node)
-        functions = ["void testFunc(){}"]
         # all the support functions
         # the functions we found
         # int main() {
@@ -946,8 +955,10 @@ def generate_c(n):
             generate_c(n.node) +\
             "".join(skeleton[-2:])
     elif isinstance(n, Function):
-        #functions.append("function code goes here")
+        functions.append("void "+n.name+"(){\n"+generate_c(n.code)+"\n}")
         return ""
+    elif isinstance(n, CallFunc):
+        return n.node.name+"()"
     elif isinstance(n, Stmt):
         return '{' + '\n'.join([generate_c(e) for e in n.nodes]) + '}'
     elif isinstance(n, Printnl):
