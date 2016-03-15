@@ -99,7 +99,8 @@ def simplify_ops(n, context='expr'):
         n.code = simplify_ops(n.code)
         return n
     elif isinstance(n, CallFunc):
-        # TODO simplify args
+        for a in n.args:
+            simplify_ops(a)
         return n
     elif isinstance(n, Return):
         n.value=simplify_ops(n.value)
@@ -298,11 +299,18 @@ def convert_to_ssa(ast, current_version={}):
         return Module(doc=ast.doc, node=convert_to_ssa(ast.node, {}))
 
     elif isinstance(ast, Function):
+        new_argnames=[]
+        for a in ast.argnames:
+            # wrap them in Name statments to avoid copy and pasting stuff (hacky)
+            name=Name(a)
+            new_argnames.append(convert_to_ssa(name).name)
+        ast.argnames=new_argnames
         ast.code = convert_to_ssa(ast.code)
         return ast
 
     elif isinstance(ast, CallFunc):
-        #TODO convert args
+        for a in ast.args:
+            convert_to_ssa(a)
         return ast
 
     elif isinstance(ast, Return):
@@ -657,6 +665,8 @@ def predict_type(n, env):
 
     elif isinstance(n, Function):
         #n.type='pyobj'
+        for a in n.argnames:
+            update_var_type(env, a, 'pyobj')
         update_var_type(env, n.name, 'pyobj')
         n.type='pyobj'
         '''
@@ -670,6 +680,8 @@ def predict_type(n, env):
 
     elif isinstance(n, CallFunc):
         n.type = get_var_type(env, n.node.name)
+        for a in n.args:
+            predict_type(a, env)
         #pass#predict_type(n.code,env)
 
     elif isinstance(n, Return):
@@ -790,6 +802,7 @@ def type_specialize(n):
         n.code=type_specialize(n.code)
         return n
     elif isinstance(n, CallFunc):
+        n.args=list(convert_to_pyobj(a) for a in n.args)
         return n
     elif isinstance(n, Return):
         n.value=convert_to_pyobj(n.value)
@@ -984,10 +997,10 @@ def generate_c(n):
             generate_c(n.node) +\
             "".join(skeleton[-2:])
     elif isinstance(n, Function):
-        functions.append(n.type+" "+n.name+"(){\n"+generate_c(n.code)+"\n}")
+        functions.append(n.type+" "+n.name+"("+(",".join("pyobj "+a for a in n.argnames))+"){\n"+generate_c(n.code)+"\n}")
         return ""
     elif isinstance(n, CallFunc):
-        return n.node.name+"()"
+        return n.node.name+"("+(",".join(generate_c(a) for a in n.args))+")"
     elif isinstance(n, Return):
         return "return "+generate_c(n.value)+";"
     elif isinstance(n, Stmt):
