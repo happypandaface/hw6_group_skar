@@ -13,4 +13,6 @@ CFLAGS=\
 '-Wno-unused-function -Wno-unused-but-set-variable '\
 '-Werror=implicit-function-declaration '
 
-gcc $CFLAGS -x c -o $2 $1
+gcc $CFLAGS -c -o hashtable.o hashtable.c
+gcc $CFLAGS -c -o hashtable_itr.o hashtable_itr.c
+gcc $CFLAGS -o $2 hashtable.o hashtable_itr.o -x c $1 -lm
