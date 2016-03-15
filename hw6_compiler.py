@@ -95,6 +95,9 @@ def simplify_ops(n, context='expr'):
     if isinstance(n, Module):
         node = simplify_ops(n.node)
         return Module(n.doc, node)
+    elif isinstance(n, Function):
+        n.code = simplify_ops(n.code)
+        return n
     elif isinstance(n, Stmt):
         nodes = [simplify_ops(s) for s in n.nodes]
         return Stmt(nodes)
@@ -287,6 +290,10 @@ def convert_to_ssa(ast, current_version={}):
         print >> logs, 'convert to ssa: ' + repr(ast)
     if isinstance(ast, Module):
         return Module(doc=ast.doc, node=convert_to_ssa(ast.node, {}))
+
+    elif isinstance(ast, Function):
+        ast.code = convert_to_ssa(ast.code)
+        return ast
 
     elif isinstance(ast, Stmt):
         return Stmt([convert_to_ssa(s, current_version) for s in ast.nodes])
@@ -634,6 +641,9 @@ def predict_type(n, env):
             type_changed = False
             predict_type(n.node, env)
 
+    elif isinstance(n, Function):
+        predict_type(n.code,env)
+
     elif isinstance(n, Stmt):
         for s in n.nodes:
             predict_type(s, env)
@@ -744,6 +754,9 @@ def type_specialize(n):
     #print >> logs, 'type specialize ' + repr(n)
     if isinstance(n, Module):
         return Module(n.doc, type_specialize(n.node))
+    elif isinstance(n, Function):
+        n.code=type_specialize(n.code)
+        return n
     elif isinstance(n, Stmt):
         return Stmt([type_specialize(s) for s in n.nodes])
     elif isinstance(n, Printnl):
@@ -842,6 +855,9 @@ def split_phis(phis):
 def remove_ssa(n):
     if isinstance(n, Module):
         return Module(n.doc, remove_ssa(n.node))
+    elif isinstance(n, Function):
+        n.code=remove_ssa(n.code)
+        return n
     elif isinstance(n, Stmt):
         return Stmt([remove_ssa(s) for s in n.nodes])
     elif isinstance(n, Printnl):
@@ -911,11 +927,27 @@ python_type_to_c = {
 
 skeleton = open("skeleton.c").readlines()
 
+functions=[] # added so that we can define functions before main
+
 def generate_c(n):
+    global functions
     if isinstance(n, Module):
-        return "".join(
-            skeleton[:-2]) + generate_c(n.node) + "".join(skeleton[-2:]
-        )
+        main = generate_c(n.node)
+        functions = ["void testFunc(){}"]
+        # all the support functions
+        # the functions we found
+        # int main() {
+        # main body 
+        # return 0;}
+        return \
+            "".join(skeleton[:-3]) +\
+            "\n".join(functions) +\
+            "".join(skeleton[-3:-2]) +\
+            generate_c(n.node) +\
+            "".join(skeleton[-2:])
+    elif isinstance(n, Function):
+        #functions.append("function code goes here")
+        return ""
     elif isinstance(n, Stmt):
         return '{' + '\n'.join([generate_c(e) for e in n.nodes]) + '}'
     elif isinstance(n, Printnl):
