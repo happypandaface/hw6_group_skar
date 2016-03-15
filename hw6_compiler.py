@@ -299,6 +299,8 @@ def convert_to_ssa(ast, current_version={}):
         return Module(doc=ast.doc, node=convert_to_ssa(ast.node, {}))
 
     elif isinstance(ast, Function):
+        # we need to put the argnames into env
+        # this should just work because of c scoping
         new_argnames=[]
         for a in ast.argnames:
             # wrap them in Name statments to avoid copy and pasting stuff (hacky)
@@ -309,6 +311,7 @@ def convert_to_ssa(ast, current_version={}):
         return ast
 
     elif isinstance(ast, CallFunc):
+        # We need to look in env for all the arguments to convert correctly
         for a in ast.args:
             convert_to_ssa(a)
         return ast
@@ -664,25 +667,18 @@ def predict_type(n, env):
             predict_type(n.node, env)
 
     elif isinstance(n, Function):
-        #n.type='pyobj'
+        # we need types for all the parameters
         for a in n.argnames:
             update_var_type(env, a, 'pyobj')
         update_var_type(env, n.name, 'pyobj')
         n.type='pyobj'
-        '''
-        for s in n.code:
-            if isinstance(s, Return):
-                predict_type(s.value, env)
-                # this will make the def stmt have a type, which is kinda hacky
-                n.type=s.value.type
-        '''
         predict_type(n.code,env)
 
     elif isinstance(n, CallFunc):
+        # we need to convert all the arguments to pyobjs
         n.type = get_var_type(env, n.node.name)
         for a in n.args:
             predict_type(a, env)
-        #pass#predict_type(n.code,env)
 
     elif isinstance(n, Return):
         n.type=predict_type(n.value, env)
