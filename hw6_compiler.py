@@ -98,6 +98,12 @@ def simplify_ops(n, context='expr'):
     elif isinstance(n, Function):
         n.code = simplify_ops(n.code)
         return n
+    elif isinstance(n, CallFunc):
+        # TODO simplify args
+        return n
+    elif isinstance(n, Return):
+        n.value=simplify_ops(n.value)
+        return n
     elif isinstance(n, Stmt):
         nodes = [simplify_ops(s) for s in n.nodes]
         return Stmt(nodes)
@@ -293,6 +299,14 @@ def convert_to_ssa(ast, current_version={}):
 
     elif isinstance(ast, Function):
         ast.code = convert_to_ssa(ast.code)
+        return ast
+
+    elif isinstance(ast, CallFunc):
+        #TODO convert args
+        return ast
+
+    elif isinstance(ast, Return):
+        ast.value=convert_to_ssa(ast.value)
         return ast
 
     elif isinstance(ast, Stmt):
@@ -642,7 +656,25 @@ def predict_type(n, env):
             predict_type(n.node, env)
 
     elif isinstance(n, Function):
+        #n.type='pyobj'
+        update_var_type(env, n.name, 'pyobj')
+        n.type='pyobj'
+        '''
+        for s in n.code:
+            if isinstance(s, Return):
+                predict_type(s.value, env)
+                # this will make the def stmt have a type, which is kinda hacky
+                n.type=s.value.type
+        '''
         predict_type(n.code,env)
+
+    elif isinstance(n, CallFunc):
+        n.type = get_var_type(env, n.node.name)
+        #pass#predict_type(n.code,env)
+
+    elif isinstance(n, Return):
+        n.type=predict_type(n.value, env)
+        pass
 
     elif isinstance(n, Stmt):
         for s in n.nodes:
@@ -757,6 +789,11 @@ def type_specialize(n):
     elif isinstance(n, Function):
         n.code=type_specialize(n.code)
         return n
+    elif isinstance(n, CallFunc):
+        return n
+    elif isinstance(n, Return):
+        n.value=convert_to_pyobj(n.value)
+        return n
     elif isinstance(n, Stmt):
         return Stmt([type_specialize(s) for s in n.nodes])
     elif isinstance(n, Printnl):
@@ -858,6 +895,8 @@ def remove_ssa(n):
     elif isinstance(n, Function):
         n.code=remove_ssa(n.code)
         return n
+    elif isinstance(n, Return):
+        return n
     elif isinstance(n, Stmt):
         return Stmt([remove_ssa(s) for s in n.nodes])
     elif isinstance(n, Printnl):
@@ -933,7 +972,6 @@ def generate_c(n):
     global functions
     if isinstance(n, Module):
         main = generate_c(n.node)
-        functions = ["void testFunc(){}"]
         # all the support functions
         # the functions we found
         # int main() {
@@ -946,8 +984,12 @@ def generate_c(n):
             generate_c(n.node) +\
             "".join(skeleton[-2:])
     elif isinstance(n, Function):
-        #functions.append("function code goes here")
+        functions.append(n.type+" "+n.name+"(){\n"+generate_c(n.code)+"\n}")
         return ""
+    elif isinstance(n, CallFunc):
+        return n.node.name+"()"
+    elif isinstance(n, Return):
+        return "return "+generate_c(n.value)+";"
     elif isinstance(n, Stmt):
         return '{' + '\n'.join([generate_c(e) for e in n.nodes]) + '}'
     elif isinstance(n, Printnl):
