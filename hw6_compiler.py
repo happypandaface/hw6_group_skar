@@ -216,8 +216,8 @@ def union(a,b):
     return a | b
 
 def assigned_vars(n):
-    if isinstance(n, Stmt):
-        return reduce(union, [assigned_vars(s) for s in n.nodes], set([]))
+    if isinstance(n, list):
+        return reduce(union, [assigned_vars(s) for s in n], set([]))
     elif isinstance(n, Print):
         return set([])
     elif isinstance(n, Pass):
@@ -236,7 +236,7 @@ def assigned_vars(n):
     elif isinstance(n, Assign):
         return reduce(union, [assigned_vars(n) for n in n.nodes], set([]))
     elif isinstance(n, Name):
-        return set([n.name])
+        return set([n.id])
     elif isinstance(n, While):
         return assigned_vars(n.body) | (
             reduce(union, [assigned_vars(s) for s in n.phis], set([]))
@@ -280,7 +280,9 @@ def convert_to_ssa(ast, current_version={}):
 
     elif isinstance(ast, Print):
         return Print(
-            [convert_to_ssa(e, current_version) for e in ast.nodes], ast.dest
+            ast.dest,
+            [convert_to_ssa(e, current_version) for e in ast.values],
+            True
         )
 
     elif isinstance(ast, Pass):
@@ -340,7 +342,7 @@ def convert_to_ssa(ast, current_version={}):
         for x in assigned:
             body_var = Name(x + '_' + str(get_current(body_cv, x)))
             pre_var = Name(x + '_' + str(get_current(pre_cv, x)))
-            phi = make_assign(x + '_' + str(get_current(current_version, x)),\
+            phi = make_assign(x + '_' + str(get_current(current_version, x)),
                               PrimitiveOp('phi', [pre_var,body_var]))
             phis.append(phi)
 
@@ -352,13 +354,13 @@ def convert_to_ssa(ast, current_version={}):
     elif isinstance(ast, Assign):
         new_rhs = convert_to_ssa(ast.value, current_version)
         new_nodes = []
-        for n in ast.nodes:
+        for n in ast.targets:
             if isinstance(n, Name):
-                x = n.name
+                x = n.id
                 x_v = get_high(x)
                 current_version[x] = x_v
                 new_nodes.append(
-                    Name(name=(x + '_' + str(x_v)), flags=n.flags)
+                    Name(id=(x + '_' + str(x_v)), ctx=n.ctx)
                 )
             else:
                 new_nodes.append(convert_to_ssa(n, current_version))
@@ -372,11 +374,12 @@ def convert_to_ssa(ast, current_version={}):
         return ast
 
     elif isinstance(ast, Name):
-        if ast.name == 'True' or ast.name == 'False':
+        if ast.id == 'True' or ast.id == 'False':
             return ast
         else:
             return Name(
-                ast.name + '_' + str(get_current(current_version, ast.name))
+                ast.id + '_' + str(get_current(current_version, ast.id)),
+                Load()  # XXX: Is this correct?
             )
 
     elif isinstance(ast, PrimitiveOp):
@@ -423,7 +426,7 @@ class VarDecl(AST):
 def insert_var_decls(n):
     if isinstance(n, Module):
         decls = [VarDecl(x,'undefined') for x in assigned_vars(n.node)]
-        return Module(n.doc, decls + [n.node])
+        return Module(decls + [n.node])
     else:
         raise Exception('Error in insert_var_decls: unhandled AST ' + repr(n))
 
@@ -557,7 +560,7 @@ find_op_tag = {
     'make_list' : (lambda ts: ''),
     'assign' : (lambda ts: reduce(join, ts, 'undefined')),
     'phi' : (lambda ts: reduce(join, ts, 'undefined')),
-		'in_comp' : boolop
+    'in_comp' : boolop
 }
 
 arith_ret = (lambda ts: arith_returns[arith_op[ts]])
@@ -585,7 +588,7 @@ op_returns = {
     'make_list' : (lambda ts: 'pyobj'),
     'assign' : (lambda ts: reduce(join, ts, 'undefined')),
     'phi' : (lambda ts: reduce(join, ts, 'undefined')),
-		'in_comp' : bool_ret
+    'in_comp' : bool_ret
     }
 
 type_changed = False
@@ -616,7 +619,7 @@ def predict_type(n, env):
         type_changed = True
         while type_changed:
             type_changed = False
-            predict_type(n.node, env)
+            predict_type(n.body, env)
 
     elif isinstance(n, FunctionDef):
         predict_type(n.code,env)
@@ -629,11 +632,8 @@ def predict_type(n, env):
             predict_type(s, env)
 
     elif isinstance(n, Print):
-        for e in n.nodes:
+        for e in n.values:
             predict_type(e, env)
-
-    elif isinstance(n, Discard):
-        predict_type(n.expr, env)
 
     elif isinstance(n, If):
         for (cond,body) in n.tests:
@@ -659,8 +659,8 @@ def predict_type(n, env):
         predict_type(n.expr, env)
         for a in n.nodes:
             if isinstance(a, Name):
-                type_changed += update_var_type(env, a.name, n.expr.type)
-                a.type = get_var_type(env, a.name)
+                type_changed += update_var_type(env, a.id, n.expr.type)
+                a.type = get_var_type(env, a.id)
             else:
                 predict_type(a, env)
 
@@ -668,9 +668,9 @@ def predict_type(n, env):
         n.type = get_var_type(env, n.name)
 
     elif isinstance(n, Num):
-        if isinstance(n.value, float):
+        if isinstance(n.n, float):
             n.type = 'float'
-        elif isinstance(n.value, int):
+        elif isinstance(n.n, int):
             n.type = 'int'
         else:
             raise Exception(
@@ -678,10 +678,10 @@ def predict_type(n, env):
             )
 
     elif isinstance(n, Name):
-        if n.name == 'True' or n.name == 'False':
+        if n.id == 'True' or n.id == 'False':
             n.type = 'bool'
         else:
-            n.type = get_var_type(env, n.name)
+            n.type = get_var_type(env, n.id)
 
     elif isinstance(n, PrimitiveOp):
         for e in n.nodes:
@@ -733,22 +733,21 @@ def test_is_true(e):
 def type_specialize(n):
     #print >> logs, 'type specialize ' + repr(n)
     if isinstance(n, Module):
-        return Module(n.doc, type_specialize(n.node))
+        return Module(type_specialize(n.body))
     elif isinstance(n, FunctionDef):
         n.code=type_specialize(n.code)
         return n
     elif isinstance(n, Call):
         return n
-    elif isinstance(n, Stmt):
-        return Stmt([type_specialize(s) for s in n.nodes])
+    elif isinstance(n, list):
+        return [type_specialize(s) for s in n]
     elif isinstance(n, Print):
         # would be nice to specialize print, but not a high priority
         return Print(
-            [convert_to_pyobj(type_specialize(e)) for e in n.nodes],
-            n.dest
+            n.dest,
+            [convert_to_pyobj(type_specialize(e)) for e in n.values],
+            True
         )
-    elif isinstance(n, Discard):
-        return Discard(type_specialize(n.expr))
     elif isinstance(n, If):
         tests = [(test_is_true(type_specialize(cond)), type_specialize(body)) \
                  for (cond,body) in n.tests]
@@ -836,15 +835,13 @@ def split_phis(phis):
 
 def remove_ssa(n):
     if isinstance(n, Module):
-        return Module(n.doc, remove_ssa(n.node))
+        return Module(remove_ssa(n.body))
     elif isinstance(n, FunctionDef):
         n.code=remove_ssa(n.code)
         return n
-    elif isinstance(n, Stmt):
-        return Stmt([remove_ssa(s) for s in n.nodes])
+    elif isinstance(n, list):
+        return [remove_ssa(s) for s in n]
     elif isinstance(n, Print):
-        return n
-    elif isinstance(n, Discard):
         return n
     elif isinstance(n, If):
         tests = [(cond, remove_ssa(body)) for (cond,body) in n.tests]
@@ -890,7 +887,7 @@ def remove_ssa(n):
     elif isinstance(n, Pass):
         return n
     elif isinstance(n, Assign):
-        return Assign(n.nodes, n.expr)
+        return Assign(n.targets, n.value)
     elif isinstance(n, VarDecl):
         return n
     else:
@@ -914,7 +911,7 @@ functions=[] # added so that we can define functions before main
 def generate_c(n):
     global functions
     if isinstance(n, Module):
-        main = generate_c(n.node)
+        main = generate_c(n.body)
         # all the support functions
         # the functions we found
         # int main() {
@@ -924,20 +921,20 @@ def generate_c(n):
             "".join(skeleton[:-3]) +\
             "\n".join(functions) +\
             "".join(skeleton[-3:-2]) +\
-            generate_c(n.node) +\
+            generate_c(n.body) +\
             "".join(skeleton[-2:])
     elif isinstance(n, FunctionDef):
         functions.append("void "+n.name+"(){\n"+generate_c(n.code)+"\n}")
         return ""
     elif isinstance(n, Call):
         return n.node.name+"()"
-    elif isinstance(n, Stmt):
-        return '{' + '\n'.join([generate_c(e) for e in n.nodes]) + '}'
+    elif isinstance(n, list):
+        return '{' + '\n'.join([generate_c(e) for e in n]) + '}'
     elif isinstance(n, Print):
         space = 'printf(\" \");'
         newline = 'printf(\"\\n\");'
         nodes_in_c = [
-            'print_%s(%s);' % (x.type, generate_c(x)) for x in n.nodes
+            'print_%s(%s);' % (x.type, generate_c(x)) for x in n.values
         ]
         return space.join(nodes_in_c) + newline
     elif isinstance(n, If):
@@ -954,15 +951,15 @@ def generate_c(n):
     elif isinstance(n, Pass):
         return ';'
     elif isinstance(n, Assign):
-        return '='.join([generate_c(v) for v in n.nodes]) \
-               + ' = ' + generate_c(n.expr) + ';'
+        return '='.join([generate_c(v) for v in n.targets]) \
+               + ' = ' + generate_c(n.value) + ';'
     elif isinstance(n, Name):
-        return n.name
+        return n.id
     elif isinstance(n, VarDecl):
         return '%s %s;' % (python_type_to_c[n.type], n.name)
 
     elif isinstance(n, Num):
-        return repr(n.value)
+        return repr(n.n)
     elif isinstance(n, Name):
         if n.name == 'True':
             return '1'
