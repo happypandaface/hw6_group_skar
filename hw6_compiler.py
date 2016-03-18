@@ -1,11 +1,96 @@
 #! /usr/bin/env python
 
-import sys
-logs = sys.stderr
-import traceback
+import ast
 import compiler
-from compiler.ast import *
 import copy
+import sys
+import traceback
+from compiler.ast import *
+from sys import stderr as logs
+
+
+def nodeclass(name, fields):
+    class temp(object):
+        def __init__(self, *args, **kwargs):
+            for fname, arg in zip(fields, args):
+                setattr(self, fname, arg)
+            for key, val in kwargs.iteritems():
+                setattr(self, key, val)
+    temp.__name__ = name
+    return temp
+
+
+def leftrightclass(name):
+    class temp(nodeclass(name, ('leftright',))):
+        def __init__(self, *args, **kwargs):
+            super(temp, self).__init__(*args, **kwargs)
+            self.left, self.right = self.leftright
+    temp.__name__ = name
+    return temp
+
+
+Module = nodeclass('Module', ('doc', 'node'))
+Stmt = nodeclass('Stmt', ('nodes',))
+Assign = nodeclass('Assign', ('nodes', 'expr'))
+Const = nodeclass('Const', ('value', 'type'))
+Name = nodeclass('Name', ('name',))
+AssName = nodeclass('AssName', ('name', 'flags'))
+Printnl = nodeclass('Printnl', ('nodes', 'dest'))
+Add = leftrightclass('Add')
+Sub = leftrightclass('Sub')
+Mul = leftrightclass('Mul')
+And = nodeclass('And', ('nodes',))
+Or = nodeclass('Or', ('nodes',))
+UnaryAdd = nodeclass('UnaryAdd', ('expr',))
+UnarySub = nodeclass('UnarySub', ('expr',))
+Not = nodeclass('Not', ('expr',))
+If = nodeclass('If', ('tests', 'else_'))
+
+
+def convert_to_old(a):
+    conv = convert_to_old
+    if isinstance(a, ast.Module):
+        return Module(doc=None, node=conv(a.body))
+    elif isinstance(a, list):
+        return Stmt(map(conv, a))
+    elif isinstance(a, ast.Assign):
+        return Assign(map(conv, a.targets), conv(a.value))
+    elif isinstance(a, ast.Num):
+        return Const(a.n)
+    elif isinstance(a, ast.Name):
+        if isinstance(a.ctx, ast.Load):
+            return Name(a.id)
+        elif isinstance(a.ctx, ast.Store):
+            return AssName(a.id, 'OP_ASSIGN')
+        else:
+            raise Exception("BUG")
+    elif isinstance(a, ast.Print):
+        return Printnl(map(conv, a.values), conv(a.dest))
+    elif isinstance(a, ast.BinOp):
+        ops = {
+            ast.Add: Add,
+            ast.Sub: Sub,
+            ast.Mult: Mul,
+        }
+        return ops[type(a.op)]((conv(a.left), conv(a.right)))
+    elif isinstance(a, ast.Name):
+        return Name(a.id)
+    elif isinstance(a, ast.BoolOp):
+        ops = {
+            ast.Or: Or,
+            ast.And: And,
+        }
+        return ops[type(a.op)](map(conv, a.values))
+    elif isinstance(a, ast.UnaryOp):
+        ops = {
+            ast.UAdd: UnaryAdd,
+            ast.USub: UnarySub,
+            ast.Not: Not,
+        }
+        return ops[type(a.op)](conv(a.operand))
+    else:
+        return a
+
 
 def prepend_stmts(ss, s):
     if isinstance(s, Stmt):
@@ -287,47 +372,47 @@ def get_current(current_version, x):
     else:
         return 0
 
-def convert_to_ssa(ast, current_version={}):
+def convert_to_ssa(a, current_version={}):
     if False:
-        print >> logs, 'convert to ssa: ' + repr(ast)
-    if isinstance(ast, Module):
-        return Module(doc=ast.doc, node=convert_to_ssa(ast.node, {}))
+        print >> logs, 'convert to ssa: ' + repr(a)
+    if isinstance(a, Module):
+        return Module(doc=a.doc, node=convert_to_ssa(a.node, {}))
 
-    elif isinstance(ast, Function):
-        ast.code = convert_to_ssa(ast.code)
-        return ast
+    elif isinstance(a, Function):
+        a.code = convert_to_ssa(a.code)
+        return a
 
-    elif isinstance(ast, CallFunc):
-        return ast
+    elif isinstance(a, CallFunc):
+        return a
 
-    elif isinstance(ast, Stmt):
-        return Stmt([convert_to_ssa(s, current_version) for s in ast.nodes])
+    elif isinstance(a, Stmt):
+        return Stmt([convert_to_ssa(s, current_version) for s in a.nodes])
 
-    elif isinstance(ast, Printnl):
+    elif isinstance(a, Printnl):
         return Printnl(
-            [convert_to_ssa(e, current_version) for e in ast.nodes], ast.dest
+            [convert_to_ssa(e, current_version) for e in a.nodes], a.dest
         )
 
-    elif isinstance(ast, Pass):
-        return ast
+    elif isinstance(a, Pass):
+        return a
 
-    elif isinstance(ast, Discard):
-        return Discard(convert_to_ssa(ast.expr, current_version))
+    elif isinstance(a, Discard):
+        return Discard(convert_to_ssa(a.expr, current_version))
 
-    elif isinstance(ast, If):
+    elif isinstance(a, If):
         new_tests = []
-        for (cond,body) in ast.tests:
+        for (cond,body) in a.tests:
             new_cond = convert_to_ssa(cond, current_version)
             body_cv = copy.deepcopy(current_version)
             new_body = convert_to_ssa(body, body_cv)
             new_tests.append((new_cond, new_body, body_cv))
 
         else_cv = copy.deepcopy(current_version)
-        new_else = convert_to_ssa(ast.else_, else_cv)
+        new_else = convert_to_ssa(a.else_, else_cv)
 
         assigned = (
-            reduce(union, [assigned_vars(b) for (c,b) in ast.tests], set([]))
-            | assigned_vars(ast.else_)
+            reduce(union, [assigned_vars(b) for (c,b) in a.tests], set([]))
+            | assigned_vars(a.else_)
         )
 
         phis = []
@@ -347,22 +432,22 @@ def convert_to_ssa(ast, current_version={}):
         ret.phis = phis
         return ret
 
-    elif isinstance(ast, While):
+    elif isinstance(a, While):
         pre_cv = copy.deepcopy(current_version)
         pre = Stmt(nodes=[])
 
         if debug:
-            print >> logs, 'convert to ssa While ', ast.test
-        assigned = assigned_vars(ast.body)
+            print >> logs, 'convert to ssa While ', a.test
+        assigned = assigned_vars(a.body)
         if debug:
             print >> logs, 'assigned = ', assigned
         for x in assigned:
             current_version[x] = get_high(x)
 
         body_cv = copy.deepcopy(current_version)
-        new_body = convert_to_ssa(ast.body, body_cv)
+        new_body = convert_to_ssa(a.body, body_cv)
 
-        new_test = convert_to_ssa(ast.test, current_version)
+        new_test = convert_to_ssa(a.test, current_version)
 
         phis = []
         for x in assigned:
@@ -377,10 +462,10 @@ def convert_to_ssa(ast, current_version={}):
         ret.phis = phis
         return ret
 
-    elif isinstance(ast, Assign):
-        new_rhs = convert_to_ssa(ast.expr, current_version)
+    elif isinstance(a, Assign):
+        new_rhs = convert_to_ssa(a.expr, current_version)
         new_nodes = []
-        for n in ast.nodes:
+        for n in a.nodes:
             if isinstance(n, AssName):
                 x = n.name
                 x_v = get_high(x)
@@ -393,40 +478,40 @@ def convert_to_ssa(ast, current_version={}):
 
         return Assign(expr=new_rhs, nodes=new_nodes)
 
-    elif ast == None:
+    elif a == None:
         return None
 
-    elif isinstance(ast, Const):
-        return ast
+    elif isinstance(a, Const):
+        return a
 
-    elif isinstance(ast, Name):
-        if ast.name == 'True' or ast.name == 'False':
-            return ast
+    elif isinstance(a, Name):
+        if a.name == 'True' or a.name == 'False':
+            return a
         else:
             return Name(
-                ast.name + '_' + str(get_current(current_version, ast.name))
+                a.name + '_' + str(get_current(current_version, a.name))
             )
 
-    elif isinstance(ast, PrimitiveOp):
-        nodes = [convert_to_ssa(e, current_version) for e in ast.nodes]
-        return PrimitiveOp(ast.name, nodes)
+    elif isinstance(a, PrimitiveOp):
+        nodes = [convert_to_ssa(e, current_version) for e in a.nodes]
+        return PrimitiveOp(a.name, nodes)
 
-    elif isinstance(ast, IfExp):
-        new_test = convert_to_ssa(ast.test, current_version)
-        new_else = convert_to_ssa(ast.else_, current_version)
-        new_then = convert_to_ssa(ast.then, current_version)
+    elif isinstance(a, IfExp):
+        new_test = convert_to_ssa(a.test, current_version)
+        new_else = convert_to_ssa(a.else_, current_version)
+        new_then = convert_to_ssa(a.then, current_version)
         return IfExp(test=new_test, else_=new_else, then=new_then)
 
-    elif isinstance(ast, Let):
-        rhs = convert_to_ssa(ast.rhs, current_version)
-        v = get_high(ast.var)
-        current_version[ast.var] = v
-        body = convert_to_ssa(ast.body, current_version)
-        return Let(ast.var + '_' + str(v), rhs, body)
+    elif isinstance(a, Let):
+        rhs = convert_to_ssa(a.rhs, current_version)
+        v = get_high(a.var)
+        current_version[a.var] = v
+        body = convert_to_ssa(a.body, current_version)
+        return Let(a.var + '_' + str(v), rhs, body)
 
     else:
         raise Exception(
-            'Error in convert_to_ssa: unrecognized AST node ' + repr(ast)
+            'Error in convert_to_ssa: unrecognized AST node ' + repr(a)
         )
 
 
@@ -1038,45 +1123,45 @@ def generate_c(n):
 
 if __name__ == "__main__":
     global debug
-    debug = not any(arg == '-q' for arg in sys.argv[1:])
+
+    argnum = 1
+    debug = True
+    infile = sys.stdin
+    if len(sys.argv) >= argnum + 1 and sys.argv[argnum] == '-q':
+        debug = False
+        argnum += 1
+    if len(sys.argv) >= argnum + 1:
+        infile = open(sys.argv[argnum])
+        argnum += 1
+    if len(sys.argv) >= argnum + 1:
+        raise Exception("Trailing arguments")
 
     try:
-        ast = compiler.parse("".join(sys.stdin.readlines()))
+        a = ast.parse("".join(infile.readlines()))
         if debug:
-            print >> logs, ast
+            print >> logs, 'converting to old format --------------'
+        ir = convert_to_old(a)
+        if debug:
             print >> logs, 'simplifying ops --------------'
-        ir = simplify_ops(ast)
+        ir = simplify_ops(ir)
         if debug:
-            print >> logs, ir
             print >> logs, 'converting to ssa -----------'
         ir = convert_to_ssa(ir)
         if debug:
-            print >> logs, ir
             print >> logs, 'inserting var decls ---------'
         ir = insert_var_decls(ir)
         if debug:
-            print >> logs, ir
             print >> logs, 'predicting types -----------'
         predict_type(ir, {})
         if debug:
-            print >> logs, ir
             print >> logs, 'type specialization -------'
-            print >> logs, ir
         ir = type_specialize(ir)
         if debug:
             print >> logs, 'remove ssa ----------------'
-            print >> logs, ir
         ir = remove_ssa(ir)
         if debug:
             print >> logs, 'finished remove ssa ------'
-            print >> logs, ir
             print >> logs, 'generating C'
         print generate_c(ir)
     except EOFError:
         print "Could not open file %s." % sys.argv[1]
-    except Exception, e:
-        print >> logs, "exception!"
-        print >> logs, e
-        traceback.print_exc(file=logs)
-
-        exit(-1)
