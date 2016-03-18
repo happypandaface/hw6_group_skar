@@ -1,11 +1,11 @@
 #! /usr/bin/env python
 
+import ast
 import sys
-logs = sys.stderr
 import traceback
-import compiler
-from compiler.ast import *
 import copy
+from ast import *
+from sys import stderr as logs
 
 def prepend_stmts(ss, s):
     if isinstance(s, Stmt):
@@ -34,7 +34,7 @@ def make_assign(lhs, rhs):
 # New Classes for the Intermediate Representation that
 # provide a uniform representation for binary and unary operations
 
-class PrimitiveOp(Node):
+class PrimitiveOp(AST):
     def __init__(self, name, nodes, lineno=None):
         self.name = name
         self.nodes = nodes
@@ -50,7 +50,7 @@ class PrimitiveOp(Node):
         return ("PrimitiveOp(%s, %s)"
             % (self.name, ', '.join([repr(e) for e in self.nodes])))
 
-class Let(Node):
+class Let(AST):
     def __init__(self, var, rhs, body, lineno=None):
         self.var = var
         self.rhs = rhs
@@ -77,12 +77,12 @@ def generate_name(x):
     counter = counter + 1
     return name
 
-binary_op_classes = [Add, Sub, Mul, Div]
-unary_op_classes = [UnaryAdd, UnarySub, Not]
+binary_op_classes = [Add, Sub, Mult, Div]
+unary_op_classes = [UAdd, USub, Not]
 
 class_to_fun = {
-    Add: 'add', Sub: 'sub', Mul: 'mul', Div: 'div', UnaryAdd: 'unary_add',
-    UnarySub: 'unary_sub', Not: 'logic_not'
+    Add: 'add', Sub: 'sub', Mult: 'mul', Div: 'div', UAdd: 'unary_add',
+    USub: 'unary_sub', Not: 'logic_not'
 }
 
 compare_to_fun = {
@@ -93,12 +93,12 @@ compare_to_fun = {
 # context is either 'expr' or 'lhs'
 def simplify_ops(n, context='expr'):
     if isinstance(n, Module):
-        node = simplify_ops(n.node)
+        node = simplify_ops(n.body)
         return Module(n.doc, node)
-    elif isinstance(n, Function):
+    elif isinstance(n, FunctionDef):
         n.code = simplify_ops(n.code)
         return n
-    elif isinstance(n, CallFunc):
+    elif isinstance(n, Call):
         return n
     elif isinstance(n, Stmt):
         nodes = [simplify_ops(s) for s in n.nodes]
@@ -293,11 +293,11 @@ def convert_to_ssa(ast, current_version={}):
     if isinstance(ast, Module):
         return Module(doc=ast.doc, node=convert_to_ssa(ast.node, {}))
 
-    elif isinstance(ast, Function):
+    elif isinstance(ast, FunctionDef):
         ast.code = convert_to_ssa(ast.code)
         return ast
 
-    elif isinstance(ast, CallFunc):
+    elif isinstance(ast, Call):
         return ast
 
     elif isinstance(ast, Stmt):
@@ -433,7 +433,7 @@ def convert_to_ssa(ast, current_version={}):
 ###############################################################################
 # Insert variable declarations
 
-class VarDecl(Node):
+class VarDecl(AST):
     def __init__(self, name, type, lineno=None):
         self.name = name
         self.type = type
@@ -646,10 +646,10 @@ def predict_type(n, env):
             type_changed = False
             predict_type(n.node, env)
 
-    elif isinstance(n, Function):
+    elif isinstance(n, FunctionDef):
         predict_type(n.code,env)
 
-    elif isinstance(n, CallFunc):
+    elif isinstance(n, Call):
         pass#predict_type(n.code,env)
 
     elif isinstance(n, Stmt):
@@ -762,10 +762,10 @@ def type_specialize(n):
     #print >> logs, 'type specialize ' + repr(n)
     if isinstance(n, Module):
         return Module(n.doc, type_specialize(n.node))
-    elif isinstance(n, Function):
+    elif isinstance(n, FunctionDef):
         n.code=type_specialize(n.code)
         return n
-    elif isinstance(n, CallFunc):
+    elif isinstance(n, Call):
         return n
     elif isinstance(n, Stmt):
         return Stmt([type_specialize(s) for s in n.nodes])
@@ -865,7 +865,7 @@ def split_phis(phis):
 def remove_ssa(n):
     if isinstance(n, Module):
         return Module(n.doc, remove_ssa(n.node))
-    elif isinstance(n, Function):
+    elif isinstance(n, FunctionDef):
         n.code=remove_ssa(n.code)
         return n
     elif isinstance(n, Stmt):
@@ -946,7 +946,7 @@ def generate_c(n):
         # all the support functions
         # the functions we found
         # int main() {
-        # main body 
+        # main body
         # return 0;}
         return \
             "".join(skeleton[:-3]) +\
@@ -954,10 +954,10 @@ def generate_c(n):
             "".join(skeleton[-3:-2]) +\
             generate_c(n.node) +\
             "".join(skeleton[-2:])
-    elif isinstance(n, Function):
+    elif isinstance(n, FunctionDef):
         functions.append("void "+n.name+"(){\n"+generate_c(n.code)+"\n}")
         return ""
-    elif isinstance(n, CallFunc):
+    elif isinstance(n, Call):
         return n.node.name+"()"
     elif isinstance(n, Stmt):
         return '{' + '\n'.join([generate_c(e) for e in n.nodes]) + '}'
@@ -1038,45 +1038,47 @@ def generate_c(n):
 
 if __name__ == "__main__":
     global debug
-    debug = not any(arg == '-q' for arg in sys.argv[1:])
 
-    try:
-        ast = compiler.parse("".join(sys.stdin.readlines()))
-        if debug:
-            print >> logs, ast
-            print >> logs, 'simplifying ops --------------'
-        ir = simplify_ops(ast)
-        if debug:
-            print >> logs, ir
-            print >> logs, 'converting to ssa -----------'
-        ir = convert_to_ssa(ir)
-        if debug:
-            print >> logs, ir
-            print >> logs, 'inserting var decls ---------'
-        ir = insert_var_decls(ir)
-        if debug:
-            print >> logs, ir
-            print >> logs, 'predicting types -----------'
-        predict_type(ir, {})
-        if debug:
-            print >> logs, ir
-            print >> logs, 'type specialization -------'
-            print >> logs, ir
-        ir = type_specialize(ir)
-        if debug:
-            print >> logs, 'remove ssa ----------------'
-            print >> logs, ir
-        ir = remove_ssa(ir)
-        if debug:
-            print >> logs, 'finished remove ssa ------'
-            print >> logs, ir
-            print >> logs, 'generating C'
-        print generate_c(ir)
-    except EOFError:
-        print "Could not open file %s." % sys.argv[1]
-    except Exception, e:
-        print >> logs, "exception!"
-        print >> logs, e
-        traceback.print_exc(file=logs)
+    argnum = 1
+    debug = True
+    infile = sys.stdin
+    if len(sys.argv) >= argnum + 1 and sys.argv[argnum] == '-q':
+        debug = False
+        argnum += 1
+    if len(sys.argv) >= argnum + 1:
+        infile = open(sys.argv[argnum])
+        argnum += 1
+    if len(sys.argv) >= argnum + 1:
+        raise Exception("Trailing arguments")
 
-        exit(-1)
+    ast = ast.parse("".join(infile.readlines()))
+    if debug:
+        print >> logs, ast
+        print >> logs, 'simplifying ops --------------'
+    ir = simplify_ops(ast)
+    if debug:
+        print >> logs, ir
+        print >> logs, 'converting to ssa -----------'
+    ir = convert_to_ssa(ir)
+    if debug:
+        print >> logs, ir
+        print >> logs, 'inserting var decls ---------'
+    ir = insert_var_decls(ir)
+    if debug:
+        print >> logs, ir
+        print >> logs, 'predicting types -----------'
+    predict_type(ir, {})
+    if debug:
+        print >> logs, ir
+        print >> logs, 'type specialization -------'
+        print >> logs, ir
+    ir = type_specialize(ir)
+    if debug:
+        print >> logs, 'remove ssa ----------------'
+        print >> logs, ir
+    ir = remove_ssa(ir)
+    if debug:
+        print >> logs, 'finished remove ssa ------'
+        print >> logs, ir
+        print >> logs, 'generating C'
+    print generate_c(ir)
