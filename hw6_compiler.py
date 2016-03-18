@@ -69,8 +69,8 @@ class_to_fun = {
 }
 
 compare_to_fun = {
-    '<': 'less', '>': 'greater', '<=': 'less_equal', '>=': 'greater_equal',
-    '==': 'equal', '!=': 'not_equal', 'is': 'identical', 'in':'in_comp'
+    Lt: 'less', Gt: 'greater', LtE: 'less_equal', GtE: 'greater_equal',
+    Eq: 'equal', NotEq: 'not_equal', Is: 'identical', In: 'in_comp'
 }
 
 # context is either 'expr' or 'lhs'
@@ -153,7 +153,7 @@ def simplify_ops(n, context='expr'):
             if len(ops) == 1:
                 op, rhs = ops[0], comps[0]
                 return PrimitiveOp(
-                    compare_to_fun[op], [lhs, simplify_ops(rhs)]
+                    compare_to_fun[type(op)], [lhs, simplify_ops(rhs)]
                 )
             elif len(ops) > 1:
                 op, rhs = ops[0], comps[0]
@@ -163,7 +163,8 @@ def simplify_ops(n, context='expr'):
                     PrimitiveOp(
                         'logic_and',
                         [
-                            PrimitiveOp(compare_to_fun[op], [lhs, rhs_var]),
+                            PrimitiveOp(
+                                compare_to_fun[type(op)], [lhs, rhs_var]),
                             gen_compare(rhs_var, ops[1:], comps[1:])
                         ]
                     )
@@ -201,7 +202,7 @@ def simplify_ops(n, context='expr'):
     elif isinstance(n, Subscript):
         return PrimitiveOp('deref', [
             PrimitiveOp('subscript', [
-                simplify_ops(n.expr), simplify_ops(n.subs[0])
+                simplify_ops(n.value), simplify_ops(n.slice.value)
             ])
         ])
     else:
