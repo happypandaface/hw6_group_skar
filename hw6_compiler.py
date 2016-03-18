@@ -118,12 +118,14 @@ def simplify_ops(n, context='expr'):
         return n
     elif isinstance(n, Name):
         return n
-    elif n.__class__ in binary_op_classes:
-        name = class_to_fun[n.__class__]
+    elif isinstance(n, BinOp):
+        name = class_to_fun[n.op.__class__]
         left = simplify_ops(n.left)
         l_name = generate_name('left')
         right = simplify_ops(n.right)
-        return Let(l_name, left, PrimitiveOp(name, [Name(l_name), right]))
+        return Let(
+            l_name, left, PrimitiveOp(name, [Name(l_name, Load()), right])
+        )
 
     elif n.__class__ in unary_op_classes:
         return PrimitiveOp(class_to_fun[n.__class__], [simplify_ops(n.expr)])
