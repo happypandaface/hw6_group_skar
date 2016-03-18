@@ -149,14 +149,14 @@ def simplify_ops(n, context='expr'):
             simplify_ops(n.test), simplify_ops(n.then), simplify_ops(n.else_))
 
     elif isinstance(n, Compare):
-        def gen_compare(lhs, ops):
+        def gen_compare(lhs, ops, comps):
             if len(ops) == 1:
-                op, rhs = ops[0]
+                op, rhs = ops[0], comps[0]
                 return PrimitiveOp(
                     compare_to_fun[op], [lhs, simplify_ops(rhs)]
                 )
             elif len(ops) > 1:
-                op, rhs = ops[0]
+                op, rhs = ops[0], comps[0]
                 rhs_var = Name(generate_name('tmp'))
                 return Let(
                     rhs_var.name, simplify_ops(rhs),
@@ -164,38 +164,39 @@ def simplify_ops(n, context='expr'):
                         'logic_and',
                         [
                             PrimitiveOp(compare_to_fun[op], [lhs, rhs_var]),
-                            gen_compare(rhs_var, ops[1:])
+                            gen_compare(rhs_var, ops[1:], comps[1:])
                         ]
                     )
                 )
             else:
                 print >> logs, "error in gen_compare: zero length ops"
 
-        lhs_var = Name(generate_name('tmp'))
+        lhs_var = Name(generate_name('tmp'), Load())
         return Let(
-            lhs_var.name, simplify_ops(n.expr), gen_compare(lhs_var, n.ops)
+            lhs_var.id, simplify_ops(n.left),
+            gen_compare(lhs_var, n.ops, n.comparators)
         )
 
     elif isinstance(n, List):
         ls_name = generate_name('list')
         def gen_list(nodes, i):
             if len(nodes) == 0:
-                return Name(ls_name)
+                return Name(ls_name, Load())
             else:
                 return Let(
                     '_',
                     PrimitiveOp('assign', [
                         PrimitiveOp('deref', [
                             PrimitiveOp('subscript', [
-                                Name(ls_name), Num(i)
+                                Name(ls_name, Load()), Num(i)
                             ])
                         ]),
                         simplify_ops(nodes[0])
                     ]),
                     gen_list(nodes[1:], i + 1)
                 )
-        return Let(ls_name, PrimitiveOp('make_list', [Num(len(n.nodes))]),
-                   gen_list(n.nodes, 0))
+        return Let(ls_name, PrimitiveOp('make_list', [Num(len(n.elts))]),
+                   gen_list(n.elts, 0))
 
     elif isinstance(n, Subscript):
         return PrimitiveOp('deref', [
