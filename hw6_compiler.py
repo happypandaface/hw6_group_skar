@@ -9,7 +9,7 @@ from sys import stderr as logs
 
 # lhs : string, rhs : expr
 def make_assign(lhs, rhs):
-    return Assign(nodes=[Name(name=lhs, flags='OP_ASSIGN')], expr=rhs)
+    return Assign(nodes=[Name(id=lhs, flags='OP_ASSIGN')], expr=rhs)
 
 ###############################################################################
 # Simplify comparison and logic operators
@@ -88,11 +88,9 @@ def simplify_ops(n, context='expr'):
     elif isinstance(n, Print):
         return Print(n.dest, [simplify_ops(e) for e in n.values], True)
     elif isinstance(n, If):
-        tests = [
-            (simplify_ops(cond), simplify_ops(body)) for (cond,body) in n.tests
-        ]
-        else_ = simplify_ops(n.else_)
-        return If(tests, else_)
+        return If(
+            simplify_ops(n.test), simplify_ops(n.body), simplify_ops(n.orelse)
+        )
     elif n == None: # to handle when an If's else_ clause is not there
         return None
 
@@ -104,8 +102,14 @@ def simplify_ops(n, context='expr'):
         else:
             else_ = simplify_ops(n.else_)
             tmp = generate_name('tmp')
-            return Stmt([make_sssign(tmp, test),
-                         If(Name(tmp), While(Name(tmp), body, None), else_)])
+            return Stmt([
+                make_sssign(tmp, test),
+                If(
+                    Name(tmp, Load()),
+                    While(Name(tmp, Store()), body, None),
+                    else_
+                )
+            ])
     elif isinstance(n, Pass):
         return n
     elif isinstance(n, Assign):
@@ -116,8 +120,6 @@ def simplify_ops(n, context='expr'):
         return n
     elif isinstance(n, Num):
         return n
-    elif isinstance(n, Name):
-        return n
     elif isinstance(n, BinOp):
         name = class_to_fun[n.op.__class__]
         left = simplify_ops(n.left)
@@ -127,23 +129,22 @@ def simplify_ops(n, context='expr'):
             l_name, left, PrimitiveOp(name, [Name(l_name, Load()), right])
         )
 
-    elif n.__class__ in unary_op_classes:
-        return PrimitiveOp(class_to_fun[n.__class__], [simplify_ops(n.expr)])
+    elif isinstance(n, UnaryOp):
+        return PrimitiveOp(
+            class_to_fun[n.op.__class__], [simplify_ops(n.operand)])
 
-    elif isinstance(n, And):
-        nodes = [simplify_ops(e) for e in n.nodes]
+    elif isinstance(n, BoolOp):
+        nodes = [simplify_ops(e) for e in n.values]
         r = nodes[len(nodes)-1]
-        for child in reversed(nodes[0:len(nodes)-1]):
-            var = Name(generate_name('tmp'))
-            r = Let(var.name, child, IfExp(var, r, var))
-        return r
 
-    elif isinstance(n, Or):
-        nodes = [simplify_ops(e) for e in n.nodes]
-        r = nodes[len(nodes)-1]
         for child in reversed(nodes[0:len(nodes)-1]):
-            var = Name(generate_name('tmp'))
-            r = Let(var.name, child, IfExp(var, var, r))
+            var = Name(generate_name('tmp'), Store())
+            if isinstance(n.op, And):
+                r = Let(var.id, child, IfExp(var, r, var))
+            elif isinstance(n.op, Or):
+                r = Let(var.id, child, IfExp(var, var, r))
+            else:
+                raise Exception("Invalid BoolOp")
         return r
 
     elif isinstance(n, IfExp):
@@ -159,7 +160,7 @@ def simplify_ops(n, context='expr'):
                 )
             elif len(ops) > 1:
                 op, rhs = ops[0], comps[0]
-                rhs_var = Name(generate_name('tmp'))
+                rhs_var = Name(generate_name('tmp'), Load())
                 return Let(
                     rhs_var.name, simplify_ops(rhs),
                     PrimitiveOp(
@@ -228,8 +229,8 @@ def assigned_vars(n):
         return set([])
     elif isinstance(n, If):
         return (
-            reduce(union, [assigned_vars(b) for (c,b) in n.tests], set([]))
-            | assigned_vars(n.else_)
+            reduce(union, [assigned_vars(n.body)], set([]))
+            | assigned_vars(n.orelse)
             | (
                 reduce(union, [assigned_vars(s) for s in n.phis], set([]))
                 if hasattr(n, 'phis') else set([])
@@ -294,34 +295,36 @@ def convert_to_ssa(ast, current_version={}):
 
     elif isinstance(ast, If):
         new_tests = []
-        for (cond,body) in ast.tests:
-            new_cond = convert_to_ssa(cond, current_version)
-            body_cv = copy.deepcopy(current_version)
-            new_body = convert_to_ssa(body, body_cv)
-            new_tests.append((new_cond, new_body, body_cv))
+        new_cond = convert_to_ssa(ast.test, current_version)
+        body_cv = copy.deepcopy(current_version)
+        new_body = convert_to_ssa(ast.body, body_cv)
+        new_tests = (new_cond, new_body, body_cv)
 
         else_cv = copy.deepcopy(current_version)
-        new_else = convert_to_ssa(ast.else_, else_cv)
+        new_else = convert_to_ssa(ast.orelse, else_cv)
 
         assigned = (
-            reduce(union, [assigned_vars(b) for (c,b) in ast.tests], set([]))
-            | assigned_vars(ast.else_)
+            reduce(union, [assigned_vars(ast.body)], set([]))
+            | assigned_vars(ast.orelse)
         )
 
         phis = []
         for x in assigned:
             current_version[x] = get_high(x)
             phi_rhs = [
-                Name(x + '_' + str(get_current(cv, x))) for _,_,cv in new_tests
+                Name(x + '_' + str(get_current(cv, x)), Load())
+                for _,_,cv in new_tests
             ]
-            phi_rhs.append(Name(x + '_' + str(get_current(else_cv, x))))
+            phi_rhs.append(
+                Name(x + '_' + str(get_current(else_cv, x)), Load())
+            )
             phi = make_assign(
                 x + '_' + str(get_current(current_version, x)),
                 PrimitiveOp('phi', phi_rhs)
             )
             phis.append(phi)
 
-        ret = If(tests=[(c,b) for (c,b,_) in new_tests], else_=new_else)
+        ret = If(test=new_tests[0], body=new_tests[1], orelse=new_else)
         ret.phis = phis
         return ret
 
@@ -344,8 +347,9 @@ def convert_to_ssa(ast, current_version={}):
 
         phis = []
         for x in assigned:
-            body_var = Name(x + '_' + str(get_current(body_cv, x)))
-            pre_var = Name(x + '_' + str(get_current(pre_cv, x)))
+            # XXX: Check the ctxs.
+            body_var = Name(x + '_' + str(get_current(body_cv, x)), Load())
+            pre_var = Name(x + '_' + str(get_current(pre_cv, x)), Load())
             phi = make_assign(x + '_' + str(get_current(current_version, x)),
                               PrimitiveOp('phi', [pre_var,body_var]))
             phis.append(phi)
@@ -392,8 +396,8 @@ def convert_to_ssa(ast, current_version={}):
 
     elif isinstance(ast, IfExp):
         new_test = convert_to_ssa(ast.test, current_version)
-        new_else = convert_to_ssa(ast.else_, current_version)
-        new_then = convert_to_ssa(ast.then, current_version)
+        new_else = convert_to_ssa(ast.orelse, current_version)
+        new_then = convert_to_ssa(ast.body, current_version)
         return IfExp(test=new_test, else_=new_else, then=new_then)
 
     elif isinstance(ast, Let):
@@ -640,10 +644,9 @@ def predict_type(n, env):
             predict_type(e, env)
 
     elif isinstance(n, If):
-        for (cond,body) in n.tests:
-            predict_type(cond,env)
-            predict_type(body,env)
-        predict_type(n.else_,env)
+        predict_type(n.test,env)
+        predict_type(n.body,env)
+        predict_type(n.orelse,env)
         for s in n.phis:
             predict_type(s,env)
 
@@ -753,11 +756,11 @@ def type_specialize(n):
             True
         )
     elif isinstance(n, If):
-        tests = [(test_is_true(type_specialize(cond)), type_specialize(body)) \
-                 for (cond,body) in n.tests]
-        else_ = type_specialize(n.else_)
+        test = test_is_true(type_specialize(n.test))
+        body = type_specialize(n.body)
+        else_ = type_specialize(n.orelse)
         phis = [type_specialize(s) for s in n.phis]
-        ret = If(tests,else_)
+        ret = If(test, body, else_)
         ret.phis = phis
         return ret
     elif n == None:
@@ -848,8 +851,8 @@ def remove_ssa(n):
     elif isinstance(n, Print):
         return n
     elif isinstance(n, If):
-        tests = [(cond, remove_ssa(body)) for (cond,body) in n.tests]
-        else_ = remove_ssa(n.else_)
+        tests = [(n.test, remove_ssa(n.body))]
+        else_ = remove_ssa(n.orelse)
         phis = [remove_ssa(s) for s in n.phis]
         branch_dict = split_phis(phis)
         if debug:
@@ -868,7 +871,7 @@ def remove_ssa(n):
             new_else = else_ + [branch_dict[b]]
         else:
             new_else = else_
-        ret = If(new_tests, new_else)
+        ret = If(new_tests[0][0], new_tests[0][1], new_else)
         return ret
     elif n == None:
         return None
@@ -942,14 +945,14 @@ def generate_c(n):
         ]
         return space.join(nodes_in_c) + newline
     elif isinstance(n, If):
-        if n.else_ == None:
+        if n.orelse == None:
             else_ = ''
         else:
-            else_ = 'else\n' + generate_c(n.else_)
-        return 'if ' + '\n else if '.join([
-            '(%s)\n%s' % (generate_c(cond), generate_c(body))
-            for cond,body in n.tests
-        ]) + else_
+            else_ = 'else\n' + generate_c(n.orelse)
+        return (
+            'if ' + '(%s)\n%s' % (generate_c(n.test), generate_c(n.body))
+            + else_
+        )
     elif isinstance(n, While):
         return 'while (%s)\n%s' % (generate_c(n.test), generate_c(n.body))
     elif isinstance(n, Pass):
@@ -957,20 +960,18 @@ def generate_c(n):
     elif isinstance(n, Assign):
         return '='.join([generate_c(v) for v in n.targets]) \
                + ' = ' + generate_c(n.value) + ';'
-    elif isinstance(n, Name):
-        return n.id
     elif isinstance(n, VarDecl):
         return '%s %s;' % (python_type_to_c[n.type], n.name)
 
     elif isinstance(n, Num):
         return repr(n.n)
     elif isinstance(n, Name):
-        if n.name == 'True':
+        if n.id == 'True':
             return '1'
-        elif n.name == 'False':
+        elif n.id == 'False':
             return '0'
         else:
-            return n.name
+            return n.id
     elif isinstance(n, PrimitiveOp):
         if n.name == 'deref':
             return '*' + generate_c(n.nodes[0])
@@ -989,7 +990,7 @@ def generate_c(n):
             )
     elif isinstance(n, IfExp):
         return '(' + generate_c(n.test) + ' ? ' \
-               + generate_c(n.then) + ':' + generate_c(n.else_) + ')'
+               + generate_c(n.body) + ':' + generate_c(n.orelse) + ')'
     elif isinstance(n, Let):
         t = python_type_to_c[n.rhs.type]
         rhs = generate_c(n.rhs)
