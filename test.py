@@ -8,7 +8,7 @@ import sys
 from sys import stdout, stderr
 
 
-TEMP = "/tmp/skar-test-cvjw8ef9823ua0d89vxhcvx71"
+TEMP = "./temp"
 
 
 def main(pyname):
