@@ -9,7 +9,7 @@ from sys import stderr as logs
 
 # lhs : string, rhs : expr
 def make_assign(lhs, rhs):
-    return Assign(nodes=[Name(id=lhs, flags='OP_ASSIGN')], expr=rhs)
+    return Assign(targets=[Name(id=lhs, flags='OP_ASSIGN')], value=rhs)
 
 ###############################################################################
 # Simplify comparison and logic operators
@@ -97,16 +97,16 @@ def simplify_ops(n, context='expr'):
     elif isinstance(n, While):
         test = simplify_ops(n.test)
         body = simplify_ops(n.body)
-        if n.else_ == None:
-            return While(test, body, None)
+        if n.orelse == []:
+            return While(test, body, [])
         else:
-            else_ = simplify_ops(n.else_)
+            else_ = simplify_ops(n.orelse)
             tmp = generate_name('tmp')
             return Stmt([
                 make_sssign(tmp, test),
                 If(
                     Name(tmp, Load()),
-                    While(Name(tmp, Store()), body, None),
+                    While(Name(tmp, Store()), body, []),
                     else_
                 )
             ])
@@ -239,7 +239,7 @@ def assigned_vars(n):
     elif n == None:
         return set([])
     elif isinstance(n, Assign):
-        return reduce(union, [assigned_vars(n) for n in n.nodes], set([]))
+        return reduce(union, [assigned_vars(n) for n in n.targets], set([]))
     elif isinstance(n, Name):
         return set([n.id])
     elif isinstance(n, While):
@@ -373,7 +373,7 @@ def convert_to_ssa(ast, current_version={}):
             else:
                 new_nodes.append(convert_to_ssa(n, current_version))
 
-        return Assign(expr=new_rhs, nodes=new_nodes)
+        return Assign(value=new_rhs, targets=new_nodes)
 
     elif ast == None:
         return None
@@ -663,10 +663,10 @@ def predict_type(n, env):
         pass
 
     elif isinstance(n, Assign):
-        predict_type(n.expr, env)
-        for a in n.nodes:
+        predict_type(n.value, env)
+        for a in n.targets:
             if isinstance(a, Name):
-                type_changed += update_var_type(env, a.id, n.expr.type)
+                type_changed += update_var_type(env, a.id, n.value.type)
                 a.type = get_var_type(env, a.id)
             else:
                 predict_type(a, env)
@@ -775,8 +775,8 @@ def type_specialize(n):
     elif isinstance(n, Pass):
         return n
     elif isinstance(n, Assign):
-        expr = type_specialize(n.expr)
-        nodes = [type_specialize(a) for a in n.nodes]
+        expr = type_specialize(n.value)
+        nodes = [type_specialize(a) for a in n.targets]
         if any([a.type == 'pyobj' for a in nodes]):
             expr = convert_to_pyobj(expr)
         return Assign(nodes, expr)
@@ -830,9 +830,9 @@ def type_specialize(n):
 def split_phis(phis):
     branch_dict = {}
     for phi in phis:
-        lhs = phi.nodes[0].name
+        lhs = phi.targets[0].id
         i = 0
-        for rhs in phi.expr.nodes:
+        for rhs in phi.value.nodes:
             if i in branch_dict:
                 branch_dict[i].append(make_assign(lhs, rhs))
             else:
@@ -883,11 +883,11 @@ def remove_ssa(n):
         if debug:
             print >> logs, 'remove ssa While ', phis, branch_dict
         if 0 < len(branch_dict):
-            ret = Stmt(
+            ret = [
                 branch_dict[0] + [
-                    While(test, body, [branch_dict[1]], None)
+                    While(test, body, [branch_dict[1]])
                 ]
-            )
+            ]
         else:
             ret = While(test, body, None)
         return ret
