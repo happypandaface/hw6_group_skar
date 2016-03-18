@@ -1,8 +1,8 @@
 if True:
-    print True
+    print 1
 elif False:
-    print False
+    print 2
 elif []:
-    print []
+    print 3
 else:
-    print None
+    print 4
