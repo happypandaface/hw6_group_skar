@@ -885,7 +885,8 @@ def generate_c(n):
                 + generate_c(n.operands[0]) + '=' + generate_c(n.operands[1])
                 + ')'
             )
-        elif n.op[-9:] == '_to_pyobj':
+        elif n.op[-9:] == '_to_pyobj' or n.op in(
+                'unary_sub_int','unary_add_op','logic_not_bool'):
             return (
                 n.op + '('
                 + ', '.join([generate_c(e) for e in n.operands])
