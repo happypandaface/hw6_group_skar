@@ -46,10 +46,10 @@ def generate_name(x):
     counter = counter + 1
     return name
 
-class_to_fun = {Add: 'add', Sub: 'sub', Mult: 'mul', Div: 'div',        
+class_to_fun = {Add: 'add', Sub: 'sub', Mult: 'mul', Div: 'div',
                 USub: 'unary_sub', Not: 'logic_not',
                 And: 'logic_and', Or: 'logic_or',
-                Lt: 'less', Gt: 'greater', LtE: 'less_equal', GtE: 'greater_equal', 
+                Lt: 'less', Gt: 'greater', LtE: 'less_equal', GtE: 'greater_equal',
                 Eq: 'equal', NotEq: 'not_equal', Is: 'identical' } #TODO: add 'in' operator
 
 # context is either 'expr' or 'lhs'
@@ -82,7 +82,7 @@ def simplify_ops(n, context='expr'):
         if len(ops) == 1:
             return PrimitiveOp(ops[0], operands)
         else: # 3<5>4 => 3<5 and 5>4
-            return PrimitiveOp('logic_and', 
+            return PrimitiveOp('logic_and',
                                [PrimitiveOp(op, [x, y]) for op, x, y in zip(ops, operands, operands[1:])])
     elif isinstance(n, List):
         ls_name = generate_name('list')
@@ -181,7 +181,7 @@ def convert_to_ssa(ast, current_version={}):
         return Print(
             ast.dest,[convert_to_ssa(e, current_version) for e in ast.values], ast.nl
         )
-       
+
     elif isinstance(ast, Expr):
         return ast
     elif isinstance(ast, Pass):
@@ -189,7 +189,7 @@ def convert_to_ssa(ast, current_version={}):
 
     #elif isinstance(ast, Discard):
     #    return Discard(convert_to_ssa(ast.expr, current_version))
-    
+
     elif isinstance(ast, If):
         new_test = convert_to_ssa(ast.test, current_version)
         new_body = []
@@ -510,7 +510,7 @@ def update_var_type(env, x, t):
 
 def predict_type(n, env):
     global type_changed
-    
+
     if isinstance(n, Module):
         type_changed = True
         while type_changed:
@@ -822,7 +822,7 @@ def generate_c(n):
         # all the support functions
         # the functions we found
         # int main() {
-        # main body 
+        # main body
         # return 0;}
         return \
             "".join(skeleton[:-3]) +\
