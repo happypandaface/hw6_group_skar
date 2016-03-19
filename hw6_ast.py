@@ -3,8 +3,6 @@
 import sys
 logs = sys.stderr
 import traceback
-#import compiler
-#from compiler.ast import *
 from ast import *
 import copy
 
@@ -48,10 +46,10 @@ def generate_name(x):
     counter = counter + 1
     return name
 
-class_to_fun = {Add: 'add', Sub: 'sub', Mult: 'mul', Div: 'div',        
+class_to_fun = {Add: 'add', Sub: 'sub', Mult: 'mul', Div: 'div',
                 USub: 'unary_sub', Not: 'logic_not',
                 And: 'logic_and', Or: 'logic_or',
-                Lt: 'less', Gt: 'greater', LtE: 'less_equal', GtE: 'greater_equal', 
+                Lt: 'less', Gt: 'greater', LtE: 'less_equal', GtE: 'greater_equal',
                 Eq: 'equal', NotEq: 'not_equal', Is: 'identical' } #TODO: add 'in' operator
 
 # context is either 'expr' or 'lhs'
@@ -94,7 +92,7 @@ def simplify_ops(n, context='expr'):
         if len(ops) == 1:
             return PrimitiveOp(ops[0], operands)
         else: # 3<5>4 => 3<5 and 5>4
-            return PrimitiveOp('logic_and', 
+            return PrimitiveOp('logic_and',
                                [PrimitiveOp(op, [x, y]) for op, x, y in zip(ops, operands, operands[1:])])
     elif isinstance(n, List):
         ls_name = generate_name('list')
@@ -102,17 +100,17 @@ def simplify_ops(n, context='expr'):
             if len(nodes) == 0:
                 return Name(id=ls_name)
             else:
-                return Let('_', PrimitiveOp('assign',\
-                                            [PrimitiveOp('deref',\
-                                                         [PrimitiveOp('subscript',\
-                                                                      [Name(id=ls_name), Num(n=i)])\
-                                                          ]),\
-                                             simplify_ops(nodes[0])]),\
+                return Let('_', PrimitiveOp('assign',
+                                            [PrimitiveOp('deref',
+                                                         [PrimitiveOp('subscript',
+                                                                      [Name(id=ls_name), Num(n=i)])
+                                                          ]),
+                                             simplify_ops(nodes[0])]),
                            gen_list(nodes[1:], i + 1))
-        return Let(ls_name, PrimitiveOp('make_list', [Num(n=len(n.elts))]),\
+        return Let(ls_name, PrimitiveOp('make_list', [Num(n=len(n.elts))]),
                    gen_list(n.elts, 0))
     elif isinstance(n, Subscript): # Subscript(value=List(elts=[...]), slice=Index(value=Num(n=0)), ctx=Load()))
-        return PrimitiveOp('deref', [PrimitiveOp('subscript', \
+        return PrimitiveOp('deref', [PrimitiveOp('subscript',
                                                  [simplify_ops(n.value), simplify_ops(n.slice.value)])])
     else:
         raise Exception('Error in simplify_ops: unrecognized AST node ' + repr(n))
@@ -207,7 +205,7 @@ def convert_to_ssa(ast, current_version={}):
         return Print(
             ast.dest,[convert_to_ssa(e, current_version) for e in ast.values], ast.nl
         )
-       
+
     elif isinstance(ast, Expr):
         return ast
     elif isinstance(ast, Pass):
@@ -215,7 +213,7 @@ def convert_to_ssa(ast, current_version={}):
 
     #elif isinstance(ast, Discard):
     #    return Discard(convert_to_ssa(ast.expr, current_version))
-    
+
     elif isinstance(ast, If):
         new_test = convert_to_ssa(ast.test, current_version)
         new_body = []
@@ -536,7 +534,7 @@ def update_var_type(env, x, t):
 
 def predict_type(n, env):
     global type_changed
-    
+
     if isinstance(n, Module):
         type_changed = True
         while type_changed:
@@ -869,7 +867,7 @@ def generate_c(n):
         # all the support functions
         # the functions we found
         # int main() {
-        # main body 
+        # main body
         # return 0;}
         main="\n".join([generate_c(s) for s in n.body])
         return \
@@ -933,7 +931,8 @@ def generate_c(n):
                 + generate_c(n.operands[0]) + '=' + generate_c(n.operands[1])
                 + ')'
             )
-        elif n.op[-9:] == '_to_pyobj':
+        elif n.op[-9:] == '_to_pyobj' or n.op in(
+                'unary_sub_int','unary_add_op','logic_not_bool'):
             return (
                 n.op + '('
                 + ', '.join([generate_c(e) for e in n.operands])
@@ -970,11 +969,22 @@ def generate_c(n):
 ######################### MAIN ##################################
 
 if __name__ == "__main__":
-    
-    debug = not any(arg == '-q' for arg in sys.argv[1:])
+    global debug
+
+    argnum = 1
+    debug = True
+    infile = sys.stdin
+    if len(sys.argv) >= argnum + 1 and sys.argv[argnum] == '-q':
+        debug = False
+        argnum += 1
+    if len(sys.argv) >= argnum + 1:
+        infile = open(sys.argv[argnum])
+        argnum += 1
+    if len(sys.argv) >= argnum + 1:
+        raise Exception("Trailing arguments")
 
     try:
-        ast = parse("".join(sys.stdin.readlines()))
+        ast = parse("".join(infile.readlines()))
         if debug:
             print >> logs, dump(ast)
             print >> logs, 'simplifying ops --------------'
@@ -1007,9 +1017,3 @@ if __name__ == "__main__":
         print generate_c(ir)
     except EOFError:
         print "Could not open file %s." % sys.argv[1]
-    except Exception, e:
-        print >> logs, "exception!"
-        print >> logs, e
-        traceback.print_exc(file=logs)
-
-        exit(-1)
