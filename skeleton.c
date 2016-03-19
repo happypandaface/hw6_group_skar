@@ -158,11 +158,12 @@ pyobj* dict_get(pyobj dict, pyobj key) {
             && i < DICT_CAP)
         ++i;
 
-    if (i >= DICT_CAP || dict.u.d[i].key.tag == NONE) {
-        fputs("Key not found\n", stderr);
+    if (i >= DICT_CAP) {
+        fputs("Key not found and dict too large\n", stderr);
         exit(2);
     }
 
+    dict.u.d[i].key = key;
     return &dict.u.d[i].value;
 }
 
@@ -279,8 +280,12 @@ void print_pyobj_rec(pyobj v) {
         print_list(v);
         break;
     }
+    case NONE: {
+        fputs("Key error\n", stderr);
+        exit(1);
+    }
     default:
-        printf("error, unhandled case in print_pyobj_rec\n");
+        fputs("error, unhandled case in print_pyobj_rec\n", stderr);
         exit(1);
     }
 }
