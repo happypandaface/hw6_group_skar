@@ -50,7 +50,7 @@ class_to_fun = {Add: 'add', Sub: 'sub', Mult: 'mul', Div: 'div',
                 USub: 'unary_sub', Not: 'logic_not',
                 And: 'logic_and', Or: 'logic_or',
                 Lt: 'less', Gt: 'greater', LtE: 'less_equal', GtE: 'greater_equal',
-                Eq: 'equal', NotEq: 'not_equal', Is: 'identical' } #TODO: add 'in' operator
+                Eq: 'equal', NotEq: 'not_equal', Is: 'identical', In: 'in_comp' } #TODO: add 'in' operator
 
 # context is either 'expr' or 'lhs'
 def simplify_ops(n, context='expr'):
@@ -554,6 +554,7 @@ def predict_type(n, env):
 
     elif isinstance(n, Call):
         n.type = get_var_type(env, n.func.id)
+        n.type = 'pyobj'
         for a in n.args:
             predict_type(a, env)
         pass
@@ -942,6 +943,8 @@ def generate_c(n):
             nest = ''
             opencount = 0
             for e in n.operands[:-1]:
+                if n.op.find('_')<0:
+                    n.op += '_pyobj'
                 nest += n.op + '(' + generate_c(e) + ','
                 opencount += 1
             nest += generate_c(n.operands[-1]) + opencount*')'
