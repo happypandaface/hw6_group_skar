@@ -632,7 +632,9 @@ def predict_type(n, env):
         typerun = e.type
         for e in n.operands[1:]:
             typerun = op_returns[n.op](tuple([typerun,e.type]))
-        if n.op=='make_list':
+        if n.op=='assign':
+          n.type='pyobj'
+        elif n.op=='make_list':
           n.type='pyobj'
         else:
           n.type = typerun
@@ -932,6 +934,11 @@ def generate_c(n):
     elif isinstance(n, PrimitiveOp):
         if n.op == 'deref':
             return '*' + generate_c(n.operands[0])
+        elif n.op == 'make_list':
+            nest = 'make_list('
+            opencount = 0
+            nest += generate_c(n.operands[-1]) + opencount*')'
+            return nest+')'
         elif n.op in (
                 'assign_pyobj', 'assign_int', 'assign_bool', 'assign_float'):
             return (
