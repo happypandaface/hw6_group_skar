@@ -541,6 +541,8 @@ def predict_type(n, env):
             type_changed = False
             for s in n.body:
                 predict_type(s, env)
+    elif isinstance(n, List):
+        n.type='pyobj'
 
     elif isinstance(n, FunctionDef):
         # we need types for all the parameters
@@ -598,6 +600,7 @@ def predict_type(n, env):
     elif isinstance(n, Assign):
         predict_type(n.value, env)
         for a in n.targets:
+            #a.type='pyobj'
             if isinstance(a, Name):
                 type_changed += update_var_type(env, a.id, n.value.type)
                 a.type = get_var_type(env, a.id)
@@ -629,7 +632,10 @@ def predict_type(n, env):
         typerun = e.type
         for e in n.operands[1:]:
             typerun = op_returns[n.op](tuple([typerun,e.type]))
-        n.type = typerun
+        if n.op=='make_list':
+          n.type='pyobj'
+        else:
+          n.type = typerun
 
     elif isinstance(n, IfExp):
         predict_type(n.test, env)
@@ -646,6 +652,7 @@ def predict_type(n, env):
         update_var_type(body_env, n.var, n.rhs.type)
         predict_type(n.body, body_env)
         n.type = n.body.type
+        #n.type='pyobj'
 
     else:
         raise Exception(
