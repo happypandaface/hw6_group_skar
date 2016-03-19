@@ -58,6 +58,16 @@ class_to_fun = {Add: 'add', Sub: 'sub', Mult: 'mul', Div: 'div',
 def simplify_ops(n, context='expr'):
     if isinstance(n, Module):
         return Module(body=map(simplify_ops, n.body))
+    elif isinstance(n, FunctionDef):
+        n.body = map(simplify_ops, n.body)
+        return n
+    elif isinstance(n, Call):
+        for a in n.args:
+            simplify_ops(a)
+        return n
+    elif isinstance(n, Return):
+        n.value=simplify_ops(n.value)
+        return n
     elif isinstance(n, Print):
         return Print(dest=n.dest, values=map(simplify_ops, n.values), nl=n.nl)
     elif isinstance(n, Expr):
@@ -169,12 +179,26 @@ def convert_to_ssa(ast, current_version={}):
     if isinstance(ast, Module):
         return Module(body=[convert_to_ssa(s, current_version) for s in ast.body])
 
-    #elif isinstance(ast, Function):
-    #    ast.code = convert_to_ssa(ast.code)
-    #    return ast
+#"Module(body=[FunctionDef(name='func', args=arguments(args=[Name(id='a', ctx=Param())], vararg=None, kwarg=None, defaults=[]), body=[Print(dest=None, values=[Num(n=5)], nl=True)], decorator_list=[])])"
+    elif isinstance(ast, FunctionDef):
+        # we need to put the argnames into env
+        # this should just work because of c scoping
+        new_argnames=arguments(args=[])
+        for a in ast.args.args:
+            # wrap them in Name statments to avoid copy and pasting stuff (hacky)
+            name=a
+            new_argnames.args.append(convert_to_ssa(name))
+        ast.args=new_argnames
+        ast.body= map(convert_to_ssa,ast.body)
+        return ast
 
-    #elif isinstance(ast, CallFunc):
-    #    return ast
+    elif isinstance(ast, Call):
+        for a in ast.args:
+            convert_to_ssa(a)
+        return ast
+    elif isinstance(ast, Return):
+        ast.value=convert_to_ssa(ast.value)
+        return ast
 
     #elif isinstance(ast, Stmt):
     #    return Stmt([convert_to_ssa(s, current_version) for s in ast.nodes])
@@ -520,11 +544,24 @@ def predict_type(n, env):
             for s in n.body:
                 predict_type(s, env)
 
-    #elif isinstance(n, Function):
-    #    predict_type(n.code,env)
+    elif isinstance(n, FunctionDef):
+        # we need types for all the parameters
+        for a in n.args.args:
+            #predict_type(a,env)
+            update_var_type(env, a.id, 'pyobj')
+        update_var_type(env, n.name, 'pyobj')
+        n.type='pyobj'
+        for i in n.body:
+            predict_type(i,env)
 
-    #elif isinstance(n, CallFunc):
-    #    pass#predict_type(n.code,env)
+    elif isinstance(n, Call):
+        n.type = get_var_type(env, n.func.id)
+        for a in n.args:
+            predict_type(a, env)
+        pass
+    elif isinstance(n, Return):
+        predict_type(n.value, env)
+        pass
 
     #elif isinstance(n, Stmt):
     #    for s in n.nodes:
@@ -641,11 +678,15 @@ def type_specialize(n):
     #print >> logs, 'type specialize ' + repr(n)
     if isinstance(n, Module):
         return Module(body=[type_specialize(s) for s in n.body])
-    #elif isinstance(n, Function):
-    #    n.code=type_specialize(n.code)
-    #    return n
-    #elif isinstance(n, CallFunc):
-    #    return n
+    elif isinstance(n, FunctionDef):
+        n.body=map(type_specialize,n.body)
+        return n
+    elif isinstance(n, Call):
+        n.args=list(convert_to_pyobj(a) for a in n.args)
+        return n
+    elif isinstance(n, Return):
+        n.value=convert_to_pyobj(n.value)
+        return n
     #elif isinstance(n, Stmt):
     #    return Stmt([type_specialize(s) for s in n.nodes])
     elif isinstance(n, Print):
@@ -751,9 +792,13 @@ def split_phis(phis):
 def remove_ssa(n):
     if isinstance(n, Module):
         return Module(body=[remove_ssa(s) for s in n.body])
-    #elif isinstance(n, Function):
-    #    n.code=remove_ssa(n.code)
-    #    return n
+    elif isinstance(n, FunctionDef):
+        n.body=map(remove_ssa,n.body)
+        return n
+    elif isinstance(n, Call):
+        return n
+    elif isinstance(n, Return):
+        return n
     #elif isinstance(n, Stmt):
     #    return Stmt([remove_ssa(s) for s in n.nodes])
     elif isinstance(n, Print):
@@ -826,17 +871,20 @@ def generate_c(n):
         # int main() {
         # main body 
         # return 0;}
+        main="\n".join([generate_c(s) for s in n.body])
         return \
             "".join(skeleton[:-3]) +\
             "\n".join(functions) +\
             "".join(skeleton[-3:-2]) +\
-            "\n".join([generate_c(s) for s in n.body])+\
+            main +\
             "".join(skeleton[-2:])
-    #elif isinstance(n, Function):
-    #   functions.append("void "+n.name+"(){\n"+generate_c(n.code)+"\n}")
-    #    return ""
-    #elif isinstance(n, CallFunc):
-    #    return n.node.name+"()"
+    elif isinstance(n, FunctionDef):
+        functions.append(n.type+" "+n.name+"("+(",".join("pyobj "+a.id for a in n.args.args))+"){\n"+"\n".join(list(generate_c(x) for x in n.body))+"\n}")
+        return ""
+    elif isinstance(n, Call):
+        return n.func.id+"("+(",".join(generate_c(a) for a in n.args))+")"
+    elif isinstance(n, Return):
+        return "return "+generate_c(n.value)+";"
     #elif isinstance(n, Stmt):
     #    return '{' + '\n'.join([generate_c(e) for e in n.nodes]) + '}'
     elif isinstance(n, Print):
