@@ -3,8 +3,6 @@
 import sys
 logs = sys.stderr
 import traceback
-#import compiler
-#from compiler.ast import *
 from ast import *
 import copy
 
@@ -92,17 +90,17 @@ def simplify_ops(n, context='expr'):
             if len(nodes) == 0:
                 return Name(id=ls_name)
             else:
-                return Let('_', PrimitiveOp('assign',\
-                                            [PrimitiveOp('deref',\
-                                                         [PrimitiveOp('subscript',\
-                                                                      [Name(id=ls_name), Num(n=i)])\
-                                                          ]),\
-                                             simplify_ops(nodes[0])]),\
+                return Let('_', PrimitiveOp('assign',
+                                            [PrimitiveOp('deref',
+                                                         [PrimitiveOp('subscript',
+                                                                      [Name(id=ls_name), Num(n=i)])
+                                                          ]),
+                                             simplify_ops(nodes[0])]),
                            gen_list(nodes[1:], i + 1))
-        return Let(ls_name, PrimitiveOp('make_list', [Num(n=len(n.elts))]),\
+        return Let(ls_name, PrimitiveOp('make_list', [Num(n=len(n.elts))]),
                    gen_list(n.elts, 0))
     elif isinstance(n, Subscript): # Subscript(value=List(elts=[...]), slice=Index(value=Num(n=0)), ctx=Load()))
-        return PrimitiveOp('deref', [PrimitiveOp('subscript', \
+        return PrimitiveOp('deref', [PrimitiveOp('subscript',
                                                  [simplify_ops(n.value), simplify_ops(n.slice.value)])])
     else:
         raise Exception('Error in simplify_ops: unrecognized AST node ' + repr(n))
