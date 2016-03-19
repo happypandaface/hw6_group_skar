@@ -119,6 +119,54 @@ pyobj make_list(int len);
 void print_pyobj(pyobj v);
 
 
+pyobj dict_create() {
+    pyobj p = {
+        .tag = DICT,
+        .u.d = malloc(sizeof(struct dict) * DICT_CAP),
+    };
+    p.u.d[0].key.tag = NONE;
+    return p;
+}
+
+
+void dict_insert(pyobj dict, pyobj key, pyobj value) {
+    unsigned int i = 0;
+    while (
+            dict.u.d[i].key.tag != NONE
+            && !identical_pyobj(dict.u.d[i].key, key)
+            && i < DICT_CAP)
+        ++i;
+
+    if (i >= DICT_CAP) {
+        fputs("Dict has grown too large\n", stderr);
+        exit(2);
+    }
+
+    dict.u.d[i].key = key;
+    dict.u.d[i].value = value;
+
+    if (i + 1 < DICT_CAP)
+        dict.u.d[i + 1].key.tag = NONE;
+}
+
+
+pyobj* dict_get(pyobj dict, pyobj key) {
+    unsigned int i = 0;
+    while (
+            dict.u.d[i].key.tag != NONE
+            && !identical_pyobj(dict.u.d[i].key, key)
+            && i < DICT_CAP)
+        ++i;
+
+    if (i >= DICT_CAP || dict.u.d[i].key.tag == NONE) {
+        fputs("Key not found\n", stderr);
+        exit(2);
+    }
+
+    return &dict.u.d[i].value;
+}
+
+
 char printed_0;
 char printed_0_neg;
 void print_float(double in)
@@ -262,6 +310,10 @@ pyobj bool_to_pyobj(char x) {
     return v;
 }
 
+pyobj dict_to_pyobj(pyobj x) {
+    return x;
+}
+
 pyobj make_list(int len) {
     pyobj v;
     v.tag = LIST;
@@ -396,6 +448,8 @@ pyobj* subscript_pyobj(pyobj c, pyobj key)
     switch (c.tag) {
     case LIST:
         return list_nth(c, key);
+    case DICT:
+        return dict_get(c, key);
     default:
         printf("error in subscript, not a list or dictionary\n");
         exit(1);
@@ -622,54 +676,6 @@ char identical_pyobj(pyobj a, pyobj b) {
     case DICT:   return (a.u.d == b.u.d);
     }
     return 0;
-}
-
-
-pyobj dict_create() {
-    pyobj p = {
-        .tag = DICT,
-        .u.d = malloc(sizeof(struct dict) * DICT_CAP),
-    };
-    p.u.d[0].key.tag = NONE;
-    return p;
-}
-
-
-void dict_insert(pyobj dict, pyobj key, pyobj value) {
-    unsigned int i = 0;
-    while (
-            dict.u.d[i].key.tag != NONE
-            && !identical_pyobj(dict.u.d[i].key, key)
-            && i < DICT_CAP)
-        ++i;
-
-    if (i >= DICT_CAP) {
-        fputs("Dict has grown too large\n", stderr);
-        exit(2);
-    }
-
-    dict.u.d[i].key = key;
-    dict.u.d[i].value = value;
-
-    if (i + 1 < DICT_CAP)
-        dict.u.d[i + 1].key.tag = NONE;
-}
-
-
-pyobj dict_get(pyobj dict, pyobj key) {
-    unsigned int i = 0;
-    while (
-            dict.u.d[i].key.tag != NONE
-            && !identical_pyobj(dict.u.d[i].key, key)
-            && i < DICT_CAP)
-        ++i;
-
-    if (i >= DICT_CAP || dict.u.d[i].key.tag == NONE) {
-        fputs("Key not found\n", stderr);
-        exit(2);
-    }
-
-    return dict.u.d[i].value;
 }
 
 
