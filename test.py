@@ -67,4 +67,7 @@ def main(pyname):
 
 
 if __name__ == '__main__':
-    main("hw6_compiler.py")
+    if len(sys.argv)<2:
+      print "what script do you want me to test?"
+    else:
+      main(sys.argv[1])
