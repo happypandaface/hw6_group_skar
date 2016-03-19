@@ -960,9 +960,3 @@ if __name__ == "__main__":
         print generate_c(ir)
     except EOFError:
         print "Could not open file %s." % sys.argv[1]
-    except Exception, e:
-        print >> logs, "exception!"
-        print >> logs, e
-        traceback.print_exc(file=logs)
-
-        exit(-1)
