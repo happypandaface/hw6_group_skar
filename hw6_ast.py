@@ -8,7 +8,6 @@ import traceback
 from ast import *
 import copy
 
-debug = True
 
 def prepend_stmts(ss, s):
     return ss + s
@@ -123,7 +122,6 @@ def assigned_vars(n):
     elif isinstance(n, Pass):
         return set([])
     elif isinstance(n, If):
-        print >> logs, dump(n)
         return (
             reduce(union, [assigned_vars(b) for b in n.body], set([]))
             | assigned_vars(n.orelse)
@@ -137,7 +135,6 @@ def assigned_vars(n):
     elif isinstance(n, Assign):
         return reduce(union, [assigned_vars(s) for s in n.targets], set([]))
     elif isinstance(n, Name):
-        print >> logs, dump(n)
         return set([n.id])
     elif isinstance(n, While):
         return reduce(union, [assigned_vars(s) for s in n.body], set([])) | (
@@ -214,9 +211,9 @@ def convert_to_ssa(ast, current_version={}):
         for x in assigned:
             current_version[x] = get_high(x)
             phi_rhs = [
-                Name(x + '_' + str(get_current(cv, x))) for _,cv in new_body
+                Name(id=(x + '_' + str(get_current(cv, x)))) for _,cv in new_body
             ]
-            phi_rhs.append(Name(x + '_' + str(get_current(orelse_cv, x))))
+            phi_rhs.append(Name(id=(x + '_' + str(get_current(orelse_cv, x)))))
             phi = make_assign(
                 x + '_' + str(get_current(current_version, x)),
                 PrimitiveOp('phi', phi_rhs)
@@ -257,7 +254,6 @@ def convert_to_ssa(ast, current_version={}):
 
         ret = While(test=new_test, body=new_body, else_=None)
         ret.phis = phis
-        print >> logs, phis
         return ret
 
     elif isinstance(ast, Assign):
@@ -296,9 +292,9 @@ def convert_to_ssa(ast, current_version={}):
 
     elif isinstance(ast, IfExp):
         new_test = convert_to_ssa(ast.test, current_version)
-        new_else = convert_to_ssa(ast.else_, current_version)
-        new_then = convert_to_ssa(ast.then, current_version)
-        return IfExp(test=new_test, else_=new_else, then=new_then)
+        new_orelse = convert_to_ssa(ast.orelse, current_version)
+        new_body = convert_to_ssa(ast.body, current_version)
+        return IfExp(test=new_test, orelse=new_orelse, body=new_body)
 
     elif isinstance(ast, Let):
         rhs = convert_to_ssa(ast.rhs, current_version)
@@ -327,7 +323,6 @@ def insert_var_decls(n):
     if isinstance(n, Module):
         decls = []
         for s in n.body:
-            print >> logs, dump(s)
             decls += [VarDecl(x,'undefined') for x in assigned_vars(s)]
         return Module(body=prepend_stmts(decls, n.body))
     else:
@@ -602,10 +597,10 @@ def predict_type(n, env):
 
     elif isinstance(n, IfExp):
         predict_type(n.test, env)
-        predict_type(n.then, env)
-        predict_type(n.else_, env)
-        if n.then.type == n.else_.type:
-            n.type = n.then.type
+        predict_type(n.body, env)
+        predict_type(n.orelse, env)
+        if n.body.type == n.orelse.type:
+            n.type = n.body.type
         else:
             n.type = 'pyobj'
 
@@ -710,13 +705,13 @@ def type_specialize(n):
         return r
     elif isinstance(n, IfExp):
         test = type_specialize(n.test)
-        then = type_specialize(n.then)
-        else_ = type_specialize(n.else_)
+        body = type_specialize(n.body)
+        orelse = type_specialize(n.orelse)
         test = test_is_true(test)
-        if any([e.type == 'pyobj' for e in [n,then,else_]]):
-            then = convert_to_pyobj(then)
-            else_ = convert_to_pyobj(else_)
-        r = IfExp(test, then, else_)
+        if any([e.type == 'pyobj' for e in [n,body,orelse]]):
+            body = convert_to_pyobj(body)
+            orelse = convert_to_pyobj(orelse)
+        r = IfExp(test, body, orelse)
         r.type = n.type
         return r
     elif isinstance(n, Let):
@@ -778,11 +773,11 @@ def remove_ssa(n):
         for s in body:
             new_body += [s]
             if 0 < len(branch_dict):
-                new_body += [branch_dict[b]]
+                new_body += branch_dict[b]
             b = b + 1
         new_orelse = orelse
         if 0 < len(branch_dict):
-            new_orelse += [branch_dict[b]]
+            new_orelse += branch_dict[b]
         ret = If(n.test, new_body, new_orelse)
         return ret
     elif n == None:
@@ -906,7 +901,7 @@ def generate_c(n):
             return nest
     elif isinstance(n, IfExp):
         return '(' + generate_c(n.test) + ' ? ' \
-               + generate_c(n.then) + ':' + generate_c(n.else_) + ')'
+               + generate_c(n.body) + ':' + generate_c(n.orelse) + ')'
     elif isinstance(n, Let):
         t = python_type_to_c[n.rhs.type]
         rhs = generate_c(n.rhs)
@@ -927,7 +922,7 @@ def generate_c(n):
 ######################### MAIN ##################################
 
 if __name__ == "__main__":
-    global debug
+    
     debug = not any(arg == '-q' for arg in sys.argv[1:])
 
     try:
