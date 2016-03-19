@@ -15,6 +15,7 @@
 #define logic_or_int(A, B) (A || B)
 #define logic_or_bool(A, B) (A || B)
 
+#define add(a, b) add_pyobj(a, b)
 #define add_int(a, b) (a + b)
 #define add_bool(a, b) (a + b)
 #define add_float(a, b) (a + b)
