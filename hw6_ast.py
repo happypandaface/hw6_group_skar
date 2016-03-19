@@ -14,19 +14,11 @@ def prepend_stmts(ss, s):
     return ss + s
 
 def append_stmts(s1, s2):
-    if isinstance(s1, Stmt):
-        if isinstance(s2,Stmt):
-            return Stmt(s1.nodes + s2.nodes)
-        else:
-            return Stmt(s1.nodes + s2)
-    elif isinstance(s2,Stmt):
-        return Stmt([s1] + s2.nodes)
-    else:
-        return Stmt([s1] + [s2])
+    return BranchStmt(prefix=s1, flow=s2)
 
 # lhs : string, rhs : expr
 def make_assign(lhs, rhs):
-    return Assign(targets=[Name(name=lhs, flags='OP_ASSIGN')], value=rhs)
+    return Assign(targets=[Name(id=lhs, flags='OP_ASSIGN')], value=rhs)
 
 ###############################################################################
 # Simplify comparison and logic operators
@@ -72,9 +64,9 @@ def simplify_ops(n, context='expr'):
     elif isinstance(n, Expr):
         return Expr(value=simplify_ops(n.value))
     elif isinstance(n, If):
-        return If(test=simplify_ops(n.test), body=simplify_ops(n.body)) # no else
+        return If(test=simplify_ops(n.test), body=[simplify_ops(s) for s in n.body],orelse=[simplify_ops(s) for s in n.orelse])
     elif isinstance(n, While):
-        return While(test=simplify_ops(test), body=simplify_ops(body)) # no orelse
+        return While(test=simplify_ops(n.test), body=[simplify_ops(s) for s in n.body]) # no orelse
     elif isinstance(n, Assign):
         return Assign(targets=map(simplify_ops, n.targets), value=simplify_ops(n.value))
     elif n.__class__ in [Num, Name]:
@@ -131,8 +123,9 @@ def assigned_vars(n):
     elif isinstance(n, Pass):
         return set([])
     elif isinstance(n, If):
+        print >> logs, dump(n)
         return (
-            reduce(union, [assigned_vars(b) for (c,b) in n.test], set([]))
+            reduce(union, [assigned_vars(b) for b in n.body], set([]))
             | assigned_vars(n.orelse)
             | (
                 reduce(union, [assigned_vars(s) for s in n.phis], set([]))
@@ -144,9 +137,10 @@ def assigned_vars(n):
     elif isinstance(n, Assign):
         return reduce(union, [assigned_vars(s) for s in n.targets], set([]))
     elif isinstance(n, Name):
+        print >> logs, dump(n)
         return set([n.id])
     elif isinstance(n, While):
-        return assigned_vars(n.body) | (
+        return reduce(union, [assigned_vars(s) for s in n.body], set([])) | (
             reduce(union, [assigned_vars(s) for s in n.phis], set([]))
             if hasattr(n, 'phis') else set([])
         )
@@ -201,61 +195,61 @@ def convert_to_ssa(ast, current_version={}):
     #elif isinstance(ast, Discard):
     #    return Discard(convert_to_ssa(ast.expr, current_version))
     
-    #not AST
     elif isinstance(ast, If):
-        new_tests = []
-        for (cond,body) in ast.tests:
-            new_cond = convert_to_ssa(cond, current_version)
+        new_test = convert_to_ssa(ast.test, current_version)
+        new_body = []
+        for s in ast.body:
             body_cv = copy.deepcopy(current_version)
-            new_body = convert_to_ssa(body, body_cv)
-            new_tests.append((new_cond, new_body, body_cv))
-
-        else_cv = copy.deepcopy(current_version)
-        new_else = convert_to_ssa(ast.else_, else_cv)
+            temp_body = convert_to_ssa(s,body_cv)
+            new_body.append((temp_body, body_cv))
+        orelse_cv = copy.deepcopy(current_version)
+        new_orelse = [convert_to_ssa(s, orelse_cv) for s in ast.orelse]
 
         assigned = (
-            reduce(union, [assigned_vars(b) for (c,b) in ast.tests], set([]))
-            | assigned_vars(ast.else_)
+            reduce(union, [assigned_vars(b) for b in ast.body], set([]))
+            | assigned_vars(ast.orelse)
         )
 
         phis = []
         for x in assigned:
             current_version[x] = get_high(x)
             phi_rhs = [
-                Name(x + '_' + str(get_current(cv, x))) for _,_,cv in new_tests
+                Name(x + '_' + str(get_current(cv, x))) for _,cv in new_body
             ]
-            phi_rhs.append(Name(x + '_' + str(get_current(else_cv, x))))
+            phi_rhs.append(Name(x + '_' + str(get_current(orelse_cv, x))))
             phi = make_assign(
                 x + '_' + str(get_current(current_version, x)),
                 PrimitiveOp('phi', phi_rhs)
             )
             phis.append(phi)
 
-        ret = If(tests=[(c,b) for (c,b,_) in new_tests], else_=new_else)
+        ret = If(test=new_test,body=[b for b,_ in new_body], orelse=new_orelse)
         ret.phis = phis
         return ret
-    #not AST
+
     elif isinstance(ast, While):
         pre_cv = copy.deepcopy(current_version)
-        pre = Stmt(nodes=[])
+        #pre = Stmt(nodes=[])
 
         if debug:
-            print >> logs, 'convert to ssa While ', ast.test
-        assigned = assigned_vars(ast.body)
+            print >> logs, 'convert to ssa While ', dump(ast.test)
+        assigned = []
+        for s in ast.body:
+            assigned += assigned_vars(s)
         if debug:
             print >> logs, 'assigned = ', assigned
         for x in assigned:
             current_version[x] = get_high(x)
 
         body_cv = copy.deepcopy(current_version)
-        new_body = convert_to_ssa(ast.body, body_cv)
+        new_body = [convert_to_ssa(s, body_cv) for s in ast.body]
 
         new_test = convert_to_ssa(ast.test, current_version)
 
         phis = []
         for x in assigned:
-            body_var = Name(x + '_' + str(get_current(body_cv, x)))
-            pre_var = Name(x + '_' + str(get_current(pre_cv, x)))
+            body_var = Name(id=(x + '_' + str(get_current(body_cv, x))),ctx=Store())
+            pre_var = Name(id=(x + '_' + str(get_current(pre_cv, x))),ctx=Store())
             phi = make_assign(x + '_' + str(get_current(current_version, x)),\
                               PrimitiveOp('phi', [pre_var,body_var]))
             phis.append(phi)
@@ -263,6 +257,7 @@ def convert_to_ssa(ast, current_version={}):
 
         ret = While(test=new_test, body=new_body, else_=None)
         ret.phis = phis
+        print >> logs, phis
         return ret
 
     elif isinstance(ast, Assign):
@@ -296,8 +291,8 @@ def convert_to_ssa(ast, current_version={}):
             )
 
     elif isinstance(ast, PrimitiveOp):
-        ops = [convert_to_ssa(e, current_version) for e in ast.nodes]
-        return PrimitiveOp(ast.name, nodes)
+        nodes = [convert_to_ssa(e, current_version) for e in ast.operands]
+        return PrimitiveOp(ast.op, nodes)
 
     elif isinstance(ast, IfExp):
         new_test = convert_to_ssa(ast.test, current_version)
@@ -331,8 +326,9 @@ class VarDecl(AST):
 def insert_var_decls(n):
     if isinstance(n, Module):
         decls = []
-        for y in n.body:
-            decls += [VarDecl(x,'undefined') for x in assigned_vars(y)]
+        for s in n.body:
+            print >> logs, dump(s)
+            decls += [VarDecl(x,'undefined') for x in assigned_vars(s)]
         return Module(body=prepend_stmts(decls, n.body))
     else:
         raise Exception('Error in insert_var_decls: unhandled AST ' + repr(n))
@@ -523,10 +519,10 @@ def predict_type(n, env):
     global type_changed
     
     if isinstance(n, Module):
-        for s in n.body:
         type_changed = True
-            while type_changed:
-                type_changed = False
+        while type_changed:
+            type_changed = False
+            for s in n.body:
                 predict_type(s, env)
 
     #elif isinstance(n, Function):
@@ -547,10 +543,11 @@ def predict_type(n, env):
     #    predict_type(n.expr, env)
 
     elif isinstance(n, If):
-        for (cond,body) in n.tests:
-            predict_type(cond,env)
-            predict_type(body,env)
-        predict_type(n.else_,env)
+        predict_type(n.test,env)
+        for s in n.body:
+            predict_type(s,env)
+        for s in n.orelse:
+            predict_type(s,env)
         for s in n.phis:
             predict_type(s,env)
 
@@ -559,7 +556,8 @@ def predict_type(n, env):
 
     elif isinstance(n, While):
         predict_type(n.test,env)
-        predict_type(n.body,env)
+        for s in n.body:
+            predict_type(s,env)
         for s in n.phis:
             predict_type(s,env)
 
@@ -595,9 +593,12 @@ def predict_type(n, env):
             n.type = get_var_type(env, n.id)
 
     elif isinstance(n, PrimitiveOp):
-        for e in n.nodes:
+        for e in n.operands:
             predict_type(e, env)
-        n.type = op_returns[n.name](tuple([e.type for e in n.nodes]))
+        typerun = e.type
+        for e in n.operands[1:]:
+            typerun = op_returns[n.op](tuple([typerun,e.type]))
+        n.type = typerun
 
     elif isinstance(n, IfExp):
         predict_type(n.test, env)
@@ -662,18 +663,18 @@ def type_specialize(n):
     #elif isinstance(n, Discard):
     #    return Discard(type_specialize(n.expr))
     elif isinstance(n, If):
-        tests = [(test_is_true(type_specialize(cond)), type_specialize(body)) \
-                 for (cond,body) in n.tests]
-        else_ = type_specialize(n.else_)
+        test = test_is_true(type_specialize(n.test))
+        body = [type_specialize(s) for s in n.body]
+        orelse = [type_specialize(s) for s in n.orelse]
         phis = [type_specialize(s) for s in n.phis]
-        ret = If(tests,else_)
+        ret = If(test,body,orelse)
         ret.phis = phis
         return ret
     elif n == None:
         return None
     elif isinstance(n, While):
         test = test_is_true(type_specialize(n.test))
-        body = type_specialize(n.body)
+        body = [type_specialize(s) for s in n.body]
         phis = [type_specialize(s) for s in n.phis]
         ret = While(test, body, None)
         ret.phis = phis
@@ -698,13 +699,13 @@ def type_specialize(n):
     elif isinstance(n, Name):
         return n
     elif isinstance(n, PrimitiveOp):
-        nodes = [type_specialize(e) for e in n.nodes]
-        tag = find_op_tag[n.name](tuple([e.type for e in n.nodes]))
+        operands = [type_specialize(e) for e in n.operands]
+        tag = find_op_tag[n.op](tuple([e.type for e in n.operands[:2]]))
         #if any([e.type == 'pyobj' for e in nodes]):
         if tag == 'pyobj':
-            nodes = [convert_to_pyobj(e) for e in nodes]
-        name = n.name if tag == '' else n.name + '_' + tag
-        r = PrimitiveOp(name, nodes)
+            operands = [convert_to_pyobj(e) for e in operands]
+        op= n.op if tag == '' else n.op + '_' + tag
+        r = PrimitiveOp(op, operands)
         r.type = n.type
         return r
     elif isinstance(n, IfExp):
@@ -733,12 +734,18 @@ def type_specialize(n):
 ###############################################################################
 # Remove SSA
 
+class BranchStmt(AST):
+    def __init__(self, prefix, flow):
+        self.prefix = prefix
+        self.flow = flow
+        self._fields = ["prefix", "flow"]
+
 def split_phis(phis):
     branch_dict = {}
     for phi in phis:
-        lhs = phi.nodes[0].name
+        lhs = phi.targets[0].id
         i = 0
-        for rhs in phi.expr.nodes:
+        for rhs in phi.value.operands:
             if i in branch_dict:
                 branch_dict[i].append(make_assign(lhs, rhs))
             else:
@@ -759,43 +766,36 @@ def remove_ssa(n):
     #elif isinstance(n, Discard):
     #    return n
     elif isinstance(n, If):
-        tests = [(cond, remove_ssa(body)) for (cond,body) in n.tests]
-        else_ = remove_ssa(n.else_)
+        body = [remove_ssa(s) for s in n.body]
+        orelse = [remove_ssa(s) for s in n.orelse]
         phis = [remove_ssa(s) for s in n.phis]
         branch_dict = split_phis(phis)
         if debug:
             print >> logs, 'remove ssa If '
             print >> logs, 'branch dict: ', branch_dict
         b = 0
-        new_tests = []
-        for (cond,body) in tests:
+        new_body = []
+        for s in body:
+            new_body += [s]
             if 0 < len(branch_dict):
-                new_body = append_stmts(body,  Stmt(branch_dict[b]))
-            else:
-                new_body = body
-            new_tests.append((cond,new_body))
+                new_body += [branch_dict[b]]
             b = b + 1
+        new_orelse = orelse
         if 0 < len(branch_dict):
-            new_else = append_stmts(else_, Stmt(branch_dict[b]))
-        else:
-            new_else = else_
-        ret = If(new_tests, new_else)
+            new_orelse += [branch_dict[b]]
+        ret = If(n.test, new_body, new_orelse)
         return ret
     elif n == None:
         return None
     elif isinstance(n, While):
         test = n.test
-        body = remove_ssa(n.body)
+        body = [remove_ssa(s) for s in n.body]
         phis = [remove_ssa(s) for s in n.phis]
         branch_dict = split_phis(phis)
         if debug:
-            print >> logs, 'remove ssa While ', phis, branch_dict
+            print >> logs, 'remove ssa While ', map(dump,phis), dump(branch_dict[0][0]), dump(branch_dict[1][0])
         if 0 < len(branch_dict):
-            ret = Stmt(
-                branch_dict[0] + [
-                    While(test, append_stmts(body, Stmt(branch_dict[1])), None)
-                ]
-            )
+            ret = BranchStmt(prefix=branch_dict[0], flow=While(test, body + branch_dict[1], None))
         else:
             ret = While(test, body, None)
         return ret
@@ -835,7 +835,7 @@ def generate_c(n):
             "".join(skeleton[:-3]) +\
             "\n".join(functions) +\
             "".join(skeleton[-3:-2]) +\
-            "".join([generate_c(s) for s in n.body])+\
+            "\n".join([generate_c(s) for s in n.body])+\
             "".join(skeleton[-2:])
     #elif isinstance(n, Function):
     #   functions.append("void "+n.name+"(){\n"+generate_c(n.code)+"\n}")
@@ -854,25 +854,22 @@ def generate_c(n):
     #elif isinstance(n, Discard):
     #    return generate_c(n.expr) + ';'
     elif isinstance(n, If):
-        if n.else_ == None:
-            else_ = ''
+        if n.orelse == None:
+            orelse = ''
         else:
-            else_ = 'else\n' + generate_c(n.else_)
-        return 'if ' + '\n else if '.join([
-            '(%s)\n%s' % (generate_c(cond), generate_c(body))
-            for cond,body in n.tests
-        ]) + else_
+            orelse = 'else{\n' + '\n'.join(['%s' % generate_c(s) for s in n.orelse]) + '}'
+            body = '\n'.join(['%s' % generate_c(s) for s in n.body])
+        return 'if ' + '(%s){\n' % generate_c(n.test) + body + '}' + \
+            '\n' + orelse + '\n'
     elif isinstance(n, While):
-        return 'while (%s)\n%s' % (generate_c(n.test), generate_c(n.body))
+        return 'while (%s){\n%s}' % (generate_c(n.test), '\n'.join([generate_c(s) for s in n.body]))
     elif isinstance(n, Pass):
         return ';'
     elif isinstance(n, Assign):
         return '='.join([generate_c(v) for v in n.targets]) \
                + ' = ' + generate_c(n.value) + ';'
-    elif isinstance(n, Name):
-        return n.id
     elif isinstance(n, VarDecl):
-        return '%s %s;' % (python_type_to_c[n.type], n.id)
+        return '%s %s;' % (python_type_to_c[n.type], n.name)
 
     elif isinstance(n, Num):
         return repr(n.n)
@@ -893,12 +890,20 @@ def generate_c(n):
                 + generate_c(n.operands[0]) + '=' + generate_c(n.operands[1])
                 + ')'
             )
-        else:
+        elif n.op[-9:] == '_to_pyobj':
             return (
                 n.op + '('
                 + ', '.join([generate_c(e) for e in n.operands])
                 + ')'
             )
+        else:
+            nest = ''
+            opencount = 0
+            for e in n.operands[:-1]:
+                nest += n.op + '(' + generate_c(e) + ','
+                opencount += 1
+            nest += generate_c(n.operands[-1]) + opencount*')'
+            return nest
     elif isinstance(n, IfExp):
         return '(' + generate_c(n.test) + ' ? ' \
                + generate_c(n.then) + ':' + generate_c(n.else_) + ')'
@@ -910,6 +915,8 @@ def generate_c(n):
             + t + ' ' + n.var + ' = ' + rhs + '; ' + generate_c(n.body)
             + ';})'
         )
+    elif isinstance(n, BranchStmt):
+        return "\n".join([generate_c(s) for s in n.prefix]) +"\n" + generate_c(n.flow)
     elif n == None:
         return ''
     else:
