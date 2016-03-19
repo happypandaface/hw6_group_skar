@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#define DICT_CAP 500
+
 #define SIGN_OF(a) (((a) < 0) ? -1 : 1)
 #define pyobj_to_bool(v) (!is_false(v))
 #define logic_and(A, B) bool_to_pyobj(pyobj_to_bool(A) && pyobj_to_bool(B))
@@ -73,9 +75,10 @@
 #define not_equal_float(a,b) (a != b)
 
 
-enum type_tag { INT, FLOAT, BOOL, LIST };
+enum type_tag { NONE, INT, FLOAT, BOOL, LIST, DICT };
 
 struct pyobj_struct;
+typedef struct pyobj_struct pyobj;
 
 struct array_struct {
     struct pyobj_struct* data;
@@ -84,6 +87,8 @@ struct array_struct {
 
 typedef struct array_struct array;
 
+typedef struct dict* dict;
+
 struct pyobj_struct {
     enum type_tag tag;
     union {
@@ -91,9 +96,14 @@ struct pyobj_struct {
         double f;             /* float */
         char b;               /* bool */
         array l;              /* list */
+        dict d;               /* dict */
     } u;
 };
-typedef struct pyobj_struct pyobj;
+
+struct dict {
+    pyobj key;
+    pyobj value;
+};
 
 
 char less_pyobj(pyobj a, pyobj b);
@@ -609,9 +619,59 @@ char identical_pyobj(pyobj a, pyobj b) {
     case BOOL:   return (a.u.b == b.u.b);
     case FLOAT:  return (a.u.f == b.u.f);
     case LIST:   return (a.u.l.len == b.u.l.len && a.u.l.data == b.u.l.data);
+    case DICT:   return (a.u.d == b.u.d);
     }
     return 0;
 }
+
+
+pyobj dict_create() {
+    pyobj p = {
+        .tag = DICT,
+        .u.d = malloc(sizeof(struct dict) * DICT_CAP),
+    };
+    p.u.d[0].key.tag = NONE;
+    return p;
+}
+
+
+void dict_insert(pyobj dict, pyobj key, pyobj value) {
+    unsigned int i = 0;
+    while (
+            dict.u.d[i].key.tag != NONE
+            && !identical_pyobj(dict.u.d[i].key, key)
+            && i < DICT_CAP)
+        ++i;
+
+    if (i >= DICT_CAP) {
+        fputs("Dict has grown too large\n", stderr);
+        exit(2);
+    }
+
+    dict.u.d[i].key = key;
+    dict.u.d[i].value = value;
+
+    if (i + 1 < DICT_CAP)
+        dict.u.d[i + 1].key.tag = NONE;
+}
+
+
+pyobj dict_get(pyobj dict, pyobj key) {
+    unsigned int i = 0;
+    while (
+            dict.u.d[i].key.tag != NONE
+            && !identical_pyobj(dict.u.d[i].key, key)
+            && i < DICT_CAP)
+        ++i;
+
+    if (i >= DICT_CAP || dict.u.d[i].key.tag == NONE) {
+        fputs("Key not found\n", stderr);
+        exit(2);
+    }
+
+    return dict.u.d[i].value;
+}
+
 
 int main() {
     return 0;

@@ -112,6 +112,11 @@ def simplify_ops(n, context='expr'):
     elif isinstance(n, Subscript): # Subscript(value=List(elts=[...]), slice=Index(value=Num(n=0)), ctx=Load()))
         return PrimitiveOp('deref', [PrimitiveOp('subscript',
                                                  [simplify_ops(n.value), simplify_ops(n.slice.value)])])
+    elif isinstance(n, Dict):
+        return Dict(
+            keys=map(simplify_ops, n.keys),
+            values=map(simplify_ops, n.values),
+        )
     else:
         raise Exception('Error in simplify_ops: unrecognized AST node ' + repr(n))
 
@@ -325,6 +330,8 @@ def convert_to_ssa(ast, current_version={}):
         body = convert_to_ssa(ast.body, current_version)
         return Let(ast.var + '_' + str(v), rhs, body)
 
+    elif isinstance(ast, Dict):
+        return ast
     else:
         raise Exception(
             'Error in convert_to_ssa: unrecognized AST node ' + repr(ast)
@@ -373,7 +380,7 @@ arith_returns = {
     'float' : 'float',
     'pyobj' : 'pyobj',
     'undefined' : 'undefined'
-    }
+}
 
 
 arith_op = {
@@ -407,7 +414,7 @@ arith_op = {
         ('int',)  : 'int',
         ('float',)  : 'float',
         ('bool',)  : 'int'
-        }
+}
 
 bool_returns = {
     'int' : 'bool',
@@ -480,7 +487,7 @@ find_op_tag = {
     'make_list' : (lambda ts: ''),
     'assign' : (lambda ts: reduce(join, ts, 'undefined')),
     'phi' : (lambda ts: reduce(join, ts, 'undefined')),
-		'in_comp' : boolop
+		'in_comp' : boolop,
 }
 
 arith_ret = (lambda ts: arith_returns[arith_op[ts]])
@@ -508,8 +515,8 @@ op_returns = {
     'make_list' : (lambda ts: 'pyobj'),
     'assign' : (lambda ts: reduce(join, ts, 'undefined')),
     'phi' : (lambda ts: reduce(join, ts, 'undefined')),
-		'in_comp' : bool_ret
-    }
+		'in_comp' : bool_ret,
+}
 
 type_changed = False
 
@@ -656,6 +663,13 @@ def predict_type(n, env):
         n.type = n.body.type
         #n.type='pyobj'
 
+    elif isinstance(n, Dict):
+        for key in n.keys:
+            predict_type(key, env)
+        for value in n.values:
+            predict_type(value, env)
+        n.type = 'dict'
+
     else:
         raise Exception(
             'Error in predict_type: unrecognized AST node ' + repr(n)
@@ -769,6 +783,8 @@ def type_specialize(n):
         r = Let(n.var, rhs, body)
         r.type = n.type
         return r
+    elif isinstance(n, Dict):
+        return n
     else:
         raise Exception(
             'Error in type_specialize: unrecognized AST node ' + repr(n)
@@ -864,7 +880,7 @@ def remove_ssa(n):
 
 python_type_to_c = {
     'int' : 'int', 'bool' : 'char', 'float' : 'double', 'pyobj' : 'pyobj',
-    'undefined' : 'pyobj'
+    'undefined' : 'pyobj', 'dict' : 'pyobj'
 }
 
 skeleton = open("skeleton.c").readlines()
@@ -978,6 +994,21 @@ def generate_c(n):
         return "\n".join([generate_c(s) for s in n.prefix]) +"\n" + generate_c(n.flow)
     elif n == None:
         return ''
+    elif isinstance(n, Dict):
+        dct = generate_name('dict')
+        i = generate_name('iter')
+        return (
+            ('({ pyobj %s = dict_create(); ' % dct)
+            + ''.join(
+                ('dict_insert(%s, %s, %s); ' % (
+                    dct,
+                    generate_c(convert_to_pyobj(key)),
+                    generate_c(convert_to_pyobj(val)),
+                ))
+                for key, val in zip(n.keys, n.values)
+            )
+            + ('%s; })' % dct)
+        )
     else:
         raise Exception(
             'Error in generate_c: unrecognized AST node ' + repr(n)
