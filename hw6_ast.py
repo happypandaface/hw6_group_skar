@@ -921,11 +921,22 @@ def generate_c(n):
 ######################### MAIN ##################################
 
 if __name__ == "__main__":
-    
-    debug = not any(arg == '-q' for arg in sys.argv[1:])
+    global debug
+
+    argnum = 1
+    debug = True
+    infile = sys.stdin
+    if len(sys.argv) >= argnum + 1 and sys.argv[argnum] == '-q':
+        debug = False
+        argnum += 1
+    if len(sys.argv) >= argnum + 1:
+        infile = open(sys.argv[argnum])
+        argnum += 1
+    if len(sys.argv) >= argnum + 1:
+        raise Exception("Trailing arguments")
 
     try:
-        ast = parse("".join(sys.stdin.readlines()))
+        ast = parse("".join(infile.readlines()))
         if debug:
             print >> logs, dump(ast)
             print >> logs, 'simplifying ops --------------'
